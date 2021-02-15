@@ -3,11 +3,24 @@ name = "nailgun"
 version = "0.1.0"
 authors = ["Evan Cameron <cameron.evan@gmail.com>"]
 edition = "2018"
+description = """
+nailgun is a small, fast, configurable tool for functional testing,
+benchmarking, and stress testing DNS servers and networks. It supports IPv4,
+IPv6, UDP, TCP, and DoT (someday) and has a modular system for generating queries used
+in the tests
+"""
+categories = ["command-line-utilities", "asynchronous", "network-programming"]
+keywords = ["dns", "performance", "testing"]
+repository = "https://github.com/leshow/nailgun"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.2", features = ["full"] }
-trust-dns-proto = "0.20.0"
-argh = "0.1.4"
 anyhow = "1.0"
+clap = "3.0.0-beta.2"
+num_cpus = "1.13.0"
+tokio = { version = "1.2", features = ["full"] }
+trust-dns-proto = { version = "0.20.0", features = ["dnssec"] }
+tracing = "0.1.23"
+tracing-futures = "0.2.4"
