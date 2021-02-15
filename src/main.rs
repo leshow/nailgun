@@ -19,6 +19,7 @@ mod args;
 use args::Args;
 
 fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     trace!("parsing cli args");
     let args = Args::parse();
     let rt = Builder::new_multi_thread()
@@ -35,7 +36,7 @@ fn main() -> Result<()> {
                 }
            },
            res = sig() => {
-            error!(?res, "nailgun exited with failure")
+            info!(?res, "caught signal handler-- exiting")
            }
         }
     });
