@@ -298,6 +298,7 @@ dependencies = [
  "anyhow",
  "clap",
  "num_cpus",
+ "once_cell",
  "tokio",
  "tracing",
  "tracing-futures",

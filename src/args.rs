@@ -1,8 +1,12 @@
 use anyhow::{anyhow, Error};
 use clap::Clap;
+use once_cell::sync::Lazy;
 use trust_dns_proto::rr::RecordType;
 
 use std::{net::IpAddr, str::FromStr};
+
+// TODO: this kinda sucks. argh didn't need this. switch back?
+static NUM_CPU: Lazy<String> = Lazy::new(|| num_cpus::get().to_string());
 
 /// nailgun is a small, fast, configurable tool for functional testing,
 /// benchmarking, and stress testing DNS servers and networks. It supports IPv4,
@@ -12,7 +16,7 @@ use std::{net::IpAddr, str::FromStr};
 #[clap(version = "0.1.0", author = "Evan Cameron <cameron.evan@gmail.com>")]
 pub(crate) struct Args {
     /// IP address to bind to. Default is 0.0.0.0 for ipv4 or ::0 for ipv6
-    #[clap(long, short = 'b', default_value = "[0,0,0,0].into()")]
+    #[clap(long, short = 'b', default_value = "0.0.0.0")]
     pub(crate) ip: IpAddr,
     /// which port to nail. Default is 53 for UDP/TCP
     #[clap(long, short = 'p', default_value = "53")]
@@ -22,16 +26,16 @@ pub(crate) struct Args {
     #[clap(long, short = 'd', default_value = "1")]
     pub(crate) delay_ms: u64,
     /// the base record to use as the query for generators. Default is test.com.
-    #[clap(long, short = 'r', default_value = "String::from(\"test.com.\")")]
+    #[clap(long, short = 'r', default_value = "test.com.")]
     pub(crate) record: String,
     /// the query type to use for generators. Default is A.
-    #[clap(long, short = 'T', default_value = "RecordType::A")]
+    #[clap(long, short = 'T', default_value = "A")]
     pub(crate) qtype: RecordType,
     /// query timeout in seconds. Default is 3.
     #[clap(long, short = 't', default_value = "3")]
     pub(crate) timeout: u64,
     /// protocol to use. Default is udp.
-    #[clap(long, short = 'P', default_value = "Protocol::UDP")]
+    #[clap(long, short = 'P', default_value = "udp")]
     pub(crate) protocol: Protocol,
     /// rate limit to a maximum queries per second, 0 is unlimited. Default is
     /// 0.
@@ -41,7 +45,7 @@ pub(crate) struct Args {
     #[clap(long, short = 'c', default_value = "10")]
     pub(crate) tcount: usize,
     /// number of tokio worker threads to spawn
-    #[clap(long, short = 'w', default_value = "num_cpus::get()")]
+    #[clap(long, short = 'w', default_value = &NUM_CPU)]
     pub(crate) wcount: usize,
     // TODO:
     /// read records from a file, one per row, QNAME and QTYPE. Used with the file generator.

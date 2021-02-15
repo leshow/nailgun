@@ -23,13 +23,20 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let rt = Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(args.wcount)
+        .worker_threads(1)
         .build()?;
     info!(?rt, "tokio runtime created");
 
     rt.block_on(async {
-        if let Err(err) = tokio::try_join!(start(), sig()) {
-            error!(?err, "nailgun exited with failure")
+        tokio::select! {
+           res = start() => {
+                if let Err(err) = res {
+                    error!(?err, "nailgun exited with failure");
+                }
+           },
+           res = sig() => {
+            error!(?res, "nailgun exited with failure")
+           }
         }
     });
     Ok(())
@@ -37,6 +44,7 @@ fn main() -> Result<()> {
 
 async fn start() -> Result<()> {
     // TODO: stuff
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     Ok(())
 }
 async fn sig() -> Result<()> {

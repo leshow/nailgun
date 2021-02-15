@@ -24,3 +24,4 @@ tokio = { version = "1.2", features = ["full"] }
 trust-dns-proto = { version = "0.20.0", features = ["dnssec"] }
 tracing = "0.1.23"
 tracing-futures = "0.2.4"
+once_cell = "1.5.2"
