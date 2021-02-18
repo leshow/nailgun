@@ -22,6 +22,7 @@ use tracing::{error, info, trace};
 
 mod args;
 mod gen;
+mod msg;
 mod shutdown;
 
 use crate::{args::Args, gen::Generator, shutdown::Shutdown};
@@ -105,13 +106,12 @@ impl Runner {
     pub(crate) async fn run(&mut self) -> Result<()> {
         // TODO: spawn a `tcount` generators per `wcount`
         // let mut generators = Vec::with_capacity(self.args.tcount);
-        for i in 0..self.args.tcount {
+        for i in 0..(self.args.wcount * self.args.tcount) {
             trace!("spawning generator {}", i);
             let mut gen = Generator {
                 config: gen::Config::try_from(&self.args)?,
                 // Receive shutdown notifications.
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
-
                 // Notifies the receiver half once all clones are
                 // dropped.
                 _shutdown_complete: self.shutdown_complete_tx.clone(),

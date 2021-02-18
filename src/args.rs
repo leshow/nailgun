@@ -42,7 +42,7 @@ pub(crate) struct Args {
     #[clap(long, short = 'c', default_value = "10")]
     pub(crate) tcount: usize,
     /// number of tokio worker threads to spawn
-    #[clap(long, short = 'w', default_value = &NUM_CPU)]
+    #[clap(long, short = 'w', default_value = "1")]
     pub(crate) wcount: usize,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
     /// file generator.
