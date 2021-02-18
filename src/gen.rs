@@ -70,28 +70,7 @@ impl TryFrom<&Args> for Config {
 
 impl Generator {
     pub(crate) async fn run(&mut self) -> Result<()> {
-        let mut ids = {
-            let mut rng = thread_rng();
-            let mut data: [MaybeUninit<u16>; u16::max_value() as usize] =
-                unsafe { MaybeUninit::uninit().assume_init() };
-
-            for (i, elem) in &mut data[..].iter_mut().enumerate() {
-                unsafe {
-                    ptr::write(elem.as_mut_ptr(), i as u16);
-                }
-            }
-
-            let mut data = unsafe {
-                mem::transmute::<
-                    [MaybeUninit<u16>; u16::max_value() as usize],
-                    [u16; u16::max_value() as usize],
-                >(data)
-            };
-            data.shuffle(&mut rng);
-            // should we just:
-            // let mut data: Vec<u16> = (0..u16::max_value()).collect();
-            // data.shuffle(&mut thread_rng());
-        };
+        let mut ids = create_and_shuffle();
         let in_flight: FxHashMap<u16, u16> = FxHashMap::default();
 
         // choose src based on addr
@@ -148,4 +127,30 @@ async fn udp_send_chan(
         }
     }
     Ok(())
+}
+
+// create a stack array of random u16's
+fn create_and_shuffle() -> [u16; u16::max_value() as usize] {
+    let mut rng = thread_rng();
+    let mut data: [MaybeUninit<u16>; u16::max_value() as usize] =
+        unsafe { MaybeUninit::uninit().assume_init() };
+
+    for (i, elem) in &mut data[..].iter_mut().enumerate() {
+        unsafe {
+            ptr::write(elem.as_mut_ptr(), i as u16);
+        }
+    }
+
+    let mut data = unsafe {
+        mem::transmute::<
+            [MaybeUninit<u16>; u16::max_value() as usize],
+            [u16; u16::max_value() as usize],
+        >(data)
+    };
+    data.shuffle(&mut rng);
+
+    data
+    // should we just:
+    // let mut data: Vec<u16> = (0..u16::max_value()).collect();
+    // data.shuffle(&mut thread_rng());
 }
