@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
     ptr,
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -15,11 +16,15 @@ use rustc_hash::FxHashMap;
 use tokio::{
     net::UdpSocket,
     sync::{broadcast, mpsc},
+    task::JoinHandle,
 };
 use tokio_stream::StreamExt;
 use tokio_util::codec::BytesCodec;
 use tracing::{error, info, trace};
-use trust_dns_proto::rr::{Name, RecordType};
+use trust_dns_proto::{
+    op::{Message, MessageType, Query},
+    rr::{Name, RecordType},
+};
 // this one is my very own:
 use tokio_udp_framed::UdpFramedRecv;
 
@@ -37,13 +42,16 @@ pub(crate) struct Generator {
     pub(crate) _shutdown_complete: mpsc::Sender<()>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Config {
     protocol: Protocol,
     addr: SocketAddr,
     record: Name,
     qtype: RecordType,
     qps: usize,
+    delay_ms: Duration,
+    timeout: Duration,
+    batch_size: usize,
     file: Option<PathBuf>,
 }
 
@@ -63,6 +71,10 @@ impl TryFrom<&Args> for Config {
             })?,
             qtype: args.qtype,
             qps: args.qps,
+            delay_ms: Duration::from_millis(args.delay_ms),
+            timeout: Duration::from_secs(args.timeout),
+            // TODO: in flamethrower batch is decided by protocol
+            batch_size: 1000,
             file: args.file.clone(),
         })
     }
@@ -70,28 +82,36 @@ impl TryFrom<&Args> for Config {
 
 impl Generator {
     pub(crate) async fn run(&mut self) -> Result<()> {
-        let mut ids = create_and_shuffle();
-        let in_flight: FxHashMap<u16, u16> = FxHashMap::default();
-
         // choose src based on addr
         let src: SocketAddr = match self.config.addr {
             SocketAddr::V4(_) => ([0, 0, 0, 0], 0).into(),
             SocketAddr::V6(_) => ("::0".parse::<IpAddr>()?, 0).into(),
         };
-        let ns_recv = Arc::new(UdpSocket::bind(src).await?);
-        let ns_send = Arc::clone(&ns_recv);
-        let (tx, rx) = mpsc::channel(10_000);
+        let r = Arc::new(UdpSocket::bind(src).await?);
+        let s = Arc::clone(&r);
+        let (tx, mut rx) = mpsc::channel(10_000);
 
-        tokio::spawn(async move {
-            if let Err(err) = udp_send_chan(rx, ns_send).await {
+        let mut sender = UdpSender {
+            config: self.config.clone(),
+            s,
+            tx,
+            ids: create_and_shuffle(),
+        };
+        let sender_handle = tokio::spawn(async move {
+            if let Err(err) = sender.run().await {
                 error!(?err, "Error in UDP send task");
             }
         });
-        let mut recv = UdpFramedRecv::new(ns_recv, BytesCodec::new());
+
+        let mut in_flight: FxHashMap<u16, ()> = FxHashMap::default();
+        let mut recv = UdpFramedRecv::new(r, BytesCodec::new());
         while !self.shutdown.is_shutdown() {
             // While reading a request frame, also listen for the shutdown
             // signal.
             tokio::select! {
+                Some(id) = rx.recv() => {
+                    in_flight.insert(id, ());
+                },
                 res = recv.next() => {
                     let frame = match res {
                         Some(frame) => frame,
@@ -100,11 +120,12 @@ impl Generator {
                     if let Ok((buf, addr)) = frame {
                         let msg= BufMsg::new(buf.freeze(), addr);
                         let id = msg.msg_id();
-                        // TODO maybe do something after we remove?
-                        // in_flight.remove(&id);
+                        in_flight.remove(&id);
                     }
                 },
                 _ = self.shutdown.recv() => {
+                    // kill sender task
+                    sender_handle.abort();
                     // If a shutdown signal is received, return from `run`.
                     // This will result in the task terminating.
                     return Ok(());
@@ -116,41 +137,46 @@ impl Generator {
     }
 }
 
-async fn udp_send_chan(
-    mut rx: mpsc::Receiver<(Bytes, SocketAddr)>,
-    ns_send: Arc<UdpSocket>,
-) -> Result<()> {
-    while let Some(msg) = rx.recv().await {
-        if let Err(err) = ns_send.send_to(&msg.0, msg.1).await {
-            error!(?err, "Error in UDP send");
-            continue;
+pub(crate) struct UdpSender {
+    config: Config,
+    s: Arc<UdpSocket>,
+    tx: mpsc::Sender<u16>,
+    ids: Vec<u16>,
+}
+
+impl UdpSender {
+    async fn run(&mut self) -> Result<()> {
+        loop {
+            for _ in 0..self.config.batch_size {
+                if let Some(next_id) = self.ids.pop() {
+                    // TODO: make message generation better
+                    let msg = QueryGen::gen(next_id, self.config.record.clone(), self.config.qtype);
+                    self.s.send_to(&msg.to_vec()?[..], self.config.addr).await?;
+                    // should this be try_send?
+                    self.tx.send(next_id).await?;
+                }
+            }
+            tokio::time::sleep(self.config.delay_ms).await;
         }
     }
-    Ok(())
 }
 
 // create a stack array of random u16's
-fn create_and_shuffle() -> [u16; u16::max_value() as usize] {
-    let mut rng = thread_rng();
-    let mut data: [MaybeUninit<u16>; u16::max_value() as usize] =
-        unsafe { MaybeUninit::uninit().assume_init() };
-
-    for (i, elem) in &mut data[..].iter_mut().enumerate() {
-        unsafe {
-            ptr::write(elem.as_mut_ptr(), i as u16);
-        }
-    }
-
-    let mut data = unsafe {
-        mem::transmute::<
-            [MaybeUninit<u16>; u16::max_value() as usize],
-            [u16; u16::max_value() as usize],
-        >(data)
-    };
-    data.shuffle(&mut rng);
+fn create_and_shuffle() -> Vec<u16> {
+    let mut data: Vec<u16> = (0..u16::max_value()).collect();
+    data.shuffle(&mut thread_rng());
 
     data
-    // should we just:
-    // let mut data: Vec<u16> = (0..u16::max_value()).collect();
-    // data.shuffle(&mut thread_rng());
+}
+
+pub(crate) struct QueryGen;
+
+impl QueryGen {
+    pub(crate) fn gen(id: u16, record: Name, qtype: RecordType) -> Message {
+        let mut msg = Message::new();
+        msg.set_id(id)
+            .add_query(Query::query(record, qtype))
+            .set_message_type(MessageType::Query);
+        msg
+    }
 }
