@@ -9,14 +9,12 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use bytes::Bytes;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use parking_lot::Mutex;
+use rand::{seq::SliceRandom, thread_rng};
 use rustc_hash::FxHashMap;
 use tokio::{
     net::UdpSocket,
     sync::{broadcast, mpsc},
-    task::JoinHandle,
 };
 use tokio_stream::StreamExt;
 use tokio_util::codec::BytesCodec;
@@ -89,13 +87,16 @@ impl Generator {
         };
         let r = Arc::new(UdpSocket::bind(src).await?);
         let s = Arc::clone(&r);
-        let (tx, mut rx) = mpsc::channel(10_000);
+        // let (tx, mut rx) = mpsc::channel(10_000);
+        let store = Arc::new(Mutex::new(Store {
+            in_flight: FxHashMap::default(),
+            ids: create_and_shuffle(),
+        }));
 
         let mut sender = UdpSender {
             config: self.config.clone(),
             s,
-            tx,
-            ids: create_and_shuffle(),
+            store: store.clone(),
         };
         let sender_handle = tokio::spawn(async move {
             if let Err(err) = sender.run().await {
@@ -103,15 +104,12 @@ impl Generator {
             }
         });
 
-        let mut in_flight: FxHashMap<u16, ()> = FxHashMap::default();
         let mut recv = UdpFramedRecv::new(r, BytesCodec::new());
+
         while !self.shutdown.is_shutdown() {
             // While reading a request frame, also listen for the shutdown
             // signal.
             tokio::select! {
-                Some(id) = rx.recv() => {
-                    in_flight.insert(id, ());
-                },
                 res = recv.next() => {
                     let frame = match res {
                         Some(frame) => frame,
@@ -120,7 +118,11 @@ impl Generator {
                     if let Ok((buf, addr)) = frame {
                         let msg= BufMsg::new(buf.freeze(), addr);
                         let id = msg.msg_id();
-                        in_flight.remove(&id);
+
+                        let mut store = store.lock();
+                        store.in_flight.remove(&id);
+                        store.ids.push(id);
+                        drop(store);
                     }
                 },
                 _ = self.shutdown.recv() => {
@@ -137,23 +139,33 @@ impl Generator {
     }
 }
 
+pub(crate) struct Store {
+    ids: Vec<u16>,
+    in_flight: FxHashMap<u16, ()>,
+}
+
 pub(crate) struct UdpSender {
     config: Config,
     s: Arc<UdpSocket>,
-    tx: mpsc::Sender<u16>,
-    ids: Vec<u16>,
+    store: Arc<Mutex<Store>>,
 }
 
 impl UdpSender {
     async fn run(&mut self) -> Result<()> {
         loop {
             for _ in 0..self.config.batch_size {
-                if let Some(next_id) = self.ids.pop() {
-                    // TODO: make message generation better
+                // have to structure like this to not hold mutex over await
+                let id = {
+                    let mut store = self.store.lock();
+                    let id = store.ids.pop();
+                    match id {
+                        Some(id) if store.in_flight.contains_key(&id) => Some(id),
+                        _ => None,
+                    }
+                };
+                if let Some(next_id) = id {
                     let msg = QueryGen::gen(next_id, self.config.record.clone(), self.config.qtype);
                     self.s.send_to(&msg.to_vec()?[..], self.config.addr).await?;
-                    // should this be try_send?
-                    self.tx.send(next_id).await?;
                 }
             }
             tokio::time::sleep(self.config.delay_ms).await;

@@ -23,6 +23,7 @@ impl BufMsg {
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
+
     /// Get dns message id from the buffer
     pub(crate) fn msg_id(&self) -> u16 {
         u16::from_be_bytes([self.buf[0], self.buf[1]])
@@ -63,8 +64,8 @@ impl BufMsg {
         Ok(len)
     }
 
-    // TODO: if you use this, use a shared BytesMut so we don't have to do the extra alloc,
-    // or remove Bytes altogether
+    // TODO: if you use this, use a shared BytesMut so we don't have to do the extra
+    // alloc, or remove Bytes altogether
     // Receive a `SerialMsg` from any new `UdpRecv`
     // pub async fn recv<S>(stream: &S) -> io::Result<Self>
     // where

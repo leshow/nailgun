@@ -349,6 +349,7 @@ dependencies = [
  "clap",
  "num_cpus",
  "once_cell",
+ "parking_lot",
  "rand",
  "rustc-hash",
  "tokio",
