@@ -10,17 +10,17 @@ pub(crate) struct BufMsg {
 
 impl BufMsg {
     /// Construct a new `SerialMsg` and the source or destination address
-    pub fn new(buf: Bytes, addr: SocketAddr) -> Self {
+    pub(crate) fn new(buf: Bytes, addr: SocketAddr) -> Self {
         BufMsg { buf, addr }
     }
 
     /// Get a reference to the bytes
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.buf
     }
 
     /// Get the source or destination address (context dependent)
-    pub fn addr(&self) -> SocketAddr {
+    pub(crate) fn addr(&self) -> SocketAddr {
         self.addr
     }
 
@@ -30,13 +30,13 @@ impl BufMsg {
     }
 
     /// Get the response code from the byte buffer (not using edns)
-    pub fn r_code(&self) -> u8 {
+    pub(crate) fn r_code(&self) -> u8 {
         let qr_to_rcode = u8::from_be_bytes([self.buf[3]]);
         0b0000_1111 & qr_to_rcode
     }
 
     /// create a new `SerialMsg` from any `AsyncReadExt`
-    pub async fn read<S>(stream: &mut S, src: SocketAddr) -> io::Result<Self>
+    pub(crate) async fn read<S>(stream: &mut S, src: SocketAddr) -> io::Result<Self>
     where
         S: Unpin + AsyncReadExt,
     {
@@ -51,7 +51,7 @@ impl BufMsg {
     }
 
     /// write a `SerialMsg` to any `AsyncWriteExt`
-    pub async fn write<S>(&self, stream: &mut S) -> io::Result<usize>
+    pub(crate) async fn write<S>(&self, stream: &mut S) -> io::Result<usize>
     where
         S: Unpin + AsyncWriteExt,
     {

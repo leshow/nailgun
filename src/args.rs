@@ -11,7 +11,7 @@ static NUM_CPU: Lazy<String> = Lazy::new(|| num_cpus::get().to_string());
 /// nailgun is a small, fast, configurable tool for functional testing,
 /// benchmarking, and stress testing DNS servers and networks. It supports IPv4,
 /// IPv6, UDP, TCP, and DoT (eventually)
-#[derive(Clap, Clone, PartialEq, Eq)]
+#[derive(Debug, Clap, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0", author = "Evan Cameron <cameron.evan@gmail.com>")]
 pub(crate) struct Args {
     /// IP address to bind to

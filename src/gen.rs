@@ -1,21 +1,16 @@
 use std::{
     convert::TryFrom,
-    mem::{self, MaybeUninit},
-    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, SocketAddr},
     path::PathBuf,
-    ptr,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use rand::{seq::SliceRandom, thread_rng};
 use rustc_hash::FxHashMap;
-use tokio::{
-    net::UdpSocket,
-    sync::{broadcast, mpsc},
-};
+use tokio::{net::UdpSocket, sync::mpsc, task::yield_now};
 use tokio_stream::StreamExt;
 use tokio_util::codec::BytesCodec;
 use tracing::{error, info, trace};
@@ -87,13 +82,12 @@ impl Generator {
         };
         let r = Arc::new(UdpSocket::bind(src).await?);
         let s = Arc::clone(&r);
-        // let (tx, mut rx) = mpsc::channel(10_000);
         let store = Arc::new(Mutex::new(Store {
             in_flight: FxHashMap::default(),
             ids: create_and_shuffle(),
         }));
 
-        let mut sender = UdpSender {
+        let sender = UdpSender {
             config: self.config.clone(),
             s,
             store: store.clone(),
@@ -107,8 +101,6 @@ impl Generator {
         let mut recv = UdpFramedRecv::new(r, BytesCodec::new());
 
         while !self.shutdown.is_shutdown() {
-            // While reading a request frame, also listen for the shutdown
-            // signal.
             tokio::select! {
                 res = recv.next() => {
                     let frame = match res {
@@ -116,34 +108,34 @@ impl Generator {
                         None => return Ok(())
                     };
                     if let Ok((buf, addr)) = frame {
-                        let msg= BufMsg::new(buf.freeze(), addr);
+                        let msg = BufMsg::new(buf.freeze(), addr);
                         let id = msg.msg_id();
-
-                        let mut store = store.lock();
-                        store.in_flight.remove(&id);
-                        store.ids.push(id);
-                        drop(store);
+                        {
+                            let mut store = store.lock();
+                            store.in_flight.remove(&id);
+                            store.ids.push(id);
+                        }
                     }
                 },
                 _ = self.shutdown.recv() => {
                     // kill sender task
+                    trace!("shutdown received");
                     sender_handle.abort();
-                    // If a shutdown signal is received, return from `run`.
-                    // This will result in the task terminating.
                     return Ok(());
                 }
             }
         }
-
         Ok(())
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Store {
     ids: Vec<u16>,
     in_flight: FxHashMap<u16, ()>,
 }
 
+#[derive(Debug)]
 pub(crate) struct UdpSender {
     config: Config,
     s: Arc<UdpSocket>,
@@ -151,15 +143,14 @@ pub(crate) struct UdpSender {
 }
 
 impl UdpSender {
-    async fn run(&mut self) -> Result<()> {
+    async fn run(&self) -> Result<()> {
         loop {
             for _ in 0..self.config.batch_size {
                 // have to structure like this to not hold mutex over await
                 let id = {
                     let mut store = self.store.lock();
-                    let id = store.ids.pop();
-                    match id {
-                        Some(id) if store.in_flight.contains_key(&id) => Some(id),
+                    match store.ids.pop() {
+                        Some(id) if !store.in_flight.contains_key(&id) => Some(id),
                         _ => None,
                     }
                 };
@@ -168,6 +159,7 @@ impl UdpSender {
                     self.s.send_to(&msg.to_vec()?[..], self.config.addr).await?;
                 }
             }
+            // tokio::task::yield_now().await;
             tokio::time::sleep(self.config.delay_ms).await;
         }
     }
@@ -177,10 +169,10 @@ impl UdpSender {
 fn create_and_shuffle() -> Vec<u16> {
     let mut data: Vec<u16> = (0..u16::max_value()).collect();
     data.shuffle(&mut thread_rng());
-
     data
 }
 
+#[derive(Debug)]
 pub(crate) struct QueryGen;
 
 impl QueryGen {

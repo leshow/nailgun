@@ -9,10 +9,11 @@
 #![deny(broken_intra_doc_links)]
 #![allow(clippy::cognitive_complexity)]
 
-use std::convert::TryFrom;
+use std::{convert::TryFrom, time::Instant};
 
 use anyhow::{anyhow, Result};
 use clap::Clap;
+use gen::Config;
 use tokio::{
     runtime::Builder,
     signal,
@@ -29,13 +30,12 @@ use crate::{args::Args, gen::Generator, shutdown::Shutdown};
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    trace!("parsing cli args");
     let args = Args::parse();
+    trace!("{:?}", args);
 
-    trace!("starting tokio runtime");
     let rt = Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(1)
+        .worker_threads(args.wcount)
         .build()?;
     info!(?rt, "tokio runtime created");
 
@@ -104,25 +104,31 @@ pub(crate) struct Runner {
 
 impl Runner {
     pub(crate) async fn run(&mut self) -> Result<()> {
-        // TODO: spawn a `tcount` generators per `wcount`
-        // let mut generators = Vec::with_capacity(self.args.tcount);
-        for i in 0..(self.args.wcount * self.args.tcount) {
+        let len = self.args.wcount * self.args.tcount;
+        let mut handles = Vec::with_capacity(len);
+
+        // let start = Instant::now();
+        for i in 0..len {
             trace!("spawning generator {}", i);
             let mut gen = Generator {
-                config: gen::Config::try_from(&self.args)?,
+                config: Config::try_from(&self.args)?,
                 // Receive shutdown notifications.
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
                 // Notifies the receiver half once all clones are
                 // dropped.
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
             };
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 if let Err(err) = gen.run().await {
                     error!(?err, "generator exited with error");
                 }
             });
+            handles.push(handle);
         }
 
+        for handle in handles {
+            handle.await?;
+        }
         Ok(())
     }
 }
