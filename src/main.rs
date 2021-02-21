@@ -9,7 +9,7 @@
 #![deny(broken_intra_doc_links)]
 #![allow(clippy::cognitive_complexity)]
 
-use std::{convert::TryFrom, time::Instant};
+use std::convert::TryFrom;
 
 use anyhow::{anyhow, Result};
 use clap::Clap;
@@ -26,7 +26,6 @@ mod gen;
 mod msg;
 mod sender;
 mod shutdown;
-mod stats;
 
 use crate::{args::Args, gen::Generator, shutdown::Shutdown};
 
