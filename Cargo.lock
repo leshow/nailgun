@@ -348,7 +348,6 @@ dependencies = [
  "bytes",
  "clap",
  "num_cpus",
- "once_cell",
  "parking_lot",
  "rand",
  "rustc-hash",

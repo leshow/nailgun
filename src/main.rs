@@ -24,7 +24,9 @@ use tracing::{error, info, trace};
 mod args;
 mod gen;
 mod msg;
+mod sender;
 mod shutdown;
+mod stats;
 
 use crate::{args::Args, gen::Generator, shutdown::Shutdown};
 
@@ -95,6 +97,7 @@ async fn sig() -> Result<()> {
     signal::ctrl_c().await.map_err(|err| anyhow!(err))
 }
 
+#[derive(Debug)]
 pub(crate) struct Runner {
     args: Args,
     notify_shutdown: broadcast::Sender<()>,
@@ -107,7 +110,6 @@ impl Runner {
         let len = self.args.wcount * self.args.tcount;
         let mut handles = Vec::with_capacity(len);
 
-        // let start = Instant::now();
         for i in 0..len {
             trace!("spawning generator {}", i);
             let mut gen = Generator {

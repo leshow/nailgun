@@ -3,33 +3,35 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant as StdInstant},
 };
 
 use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use rand::{seq::SliceRandom, thread_rng};
 use rustc_hash::FxHashMap;
-use tokio::{net::UdpSocket, sync::mpsc, task::yield_now};
+use tokio::{
+    net::UdpSocket,
+    sync::mpsc,
+    task::yield_now,
+    time::{self, Instant},
+};
 use tokio_stream::StreamExt;
 use tokio_util::codec::BytesCodec;
 use tracing::{error, info, trace};
-use trust_dns_proto::{
-    op::{Message, MessageType, Query},
-    rr::{Name, RecordType},
-};
+use trust_dns_proto::rr::{Name, RecordType};
 // this one is my very own:
 use tokio_udp_framed::UdpFramedRecv;
 
 use crate::{
     args::{Args, Protocol},
     msg::BufMsg,
+    sender::UdpSender,
     shutdown::Shutdown,
 };
 
 #[derive(Debug)]
 pub(crate) struct Generator {
-    // pub(crate) random_ids: Vec<u16>,
     pub(crate) config: Config,
     pub(crate) shutdown: Shutdown,
     pub(crate) _shutdown_complete: mpsc::Sender<()>,
@@ -37,40 +39,33 @@ pub(crate) struct Generator {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Config {
-    protocol: Protocol,
-    addr: SocketAddr,
-    record: Name,
-    qtype: RecordType,
-    qps: usize,
-    delay_ms: Duration,
-    timeout: Duration,
-    batch_size: usize,
-    file: Option<PathBuf>,
+    pub(crate) protocol: Protocol,
+    pub(crate) addr: SocketAddr,
+    pub(crate) record: Name,
+    pub(crate) qtype: RecordType,
+    pub(crate) qps: usize,
+    pub(crate) delay_ms: Duration,
+    pub(crate) timeout: Duration,
+    pub(crate) batch_size: usize,
+    pub(crate) file: Option<PathBuf>,
 }
 
-impl TryFrom<&Args> for Config {
-    type Error = anyhow::Error;
+#[derive(Debug)]
+pub(crate) struct Info {
+    elapsed: Duration,
+    in_flight: usize,
+    timeouts: usize,
+}
 
-    fn try_from(args: &Args) -> Result<Self, Self::Error> {
-        Ok(Self {
-            protocol: args.protocol,
-            addr: (args.ip, args.port).into(),
-            record: Name::from_ascii(&args.record).map_err(|err| {
-                anyhow!(
-                    "failed to parse record: {:?}. with error: {:?}",
-                    args.record,
-                    err
-                )
-            })?,
-            qtype: args.qtype,
-            qps: args.qps,
-            delay_ms: Duration::from_millis(args.delay_ms),
-            timeout: Duration::from_secs(args.timeout),
-            // TODO: in flamethrower batch is decided by protocol
-            batch_size: 1000,
-            file: args.file.clone(),
-        })
-    }
+#[derive(Debug)]
+pub(crate) struct QueryInfo {
+    pub(crate) sent: StdInstant,
+}
+
+#[derive(Debug)]
+pub(crate) struct Store {
+    pub(crate) ids: Vec<u16>,
+    pub(crate) in_flight: FxHashMap<u16, QueryInfo>,
 }
 
 impl Generator {
@@ -99,6 +94,13 @@ impl Generator {
         });
 
         let mut recv = UdpFramedRecv::new(r, BytesCodec::new());
+        let sleep = time::sleep(Duration::from_secs(1));
+        let mut interval = Instant::now();
+        tokio::pin!(sleep);
+        let mut stats = StatsTracker {
+            recv: 0,
+            latency: Duration::from_millis(0),
+        };
 
         while !self.shutdown.is_shutdown() {
             tokio::select! {
@@ -110,12 +112,24 @@ impl Generator {
                     if let Ok((buf, addr)) = frame {
                         let msg = BufMsg::new(buf.freeze(), addr);
                         let id = msg.msg_id();
-                        {
-                            let mut store = store.lock();
-                            store.in_flight.remove(&id);
+                        let mut store = store.lock();
+                        if let Some(qinfo) = store.in_flight.remove(&id) {
                             store.ids.push(id);
+                            stats.recv += 1;
+                            stats.latency += StdInstant::now().duration_since(qinfo.sent);
                         }
                     }
+                },
+                () = &mut sleep => {
+                    let now = Instant::now();
+                    if stats.recv != 0 {
+                        let elapsed = now.duration_since(interval);
+                        interval = now;
+                        info!("elapsed {}s recv {} avg latency {}", &elapsed.as_secs_f32().to_string()[0..4], stats.recv, stats.latency.as_millis() / stats.recv);
+                        stats.recv = 0;
+                        stats.latency = Duration::from_millis(0);
+                    }
+                    sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
                 _ = self.shutdown.recv() => {
                     // kill sender task
@@ -130,39 +144,9 @@ impl Generator {
 }
 
 #[derive(Debug)]
-pub(crate) struct Store {
-    ids: Vec<u16>,
-    in_flight: FxHashMap<u16, ()>,
-}
-
-#[derive(Debug)]
-pub(crate) struct UdpSender {
-    config: Config,
-    s: Arc<UdpSocket>,
-    store: Arc<Mutex<Store>>,
-}
-
-impl UdpSender {
-    async fn run(&self) -> Result<()> {
-        loop {
-            for _ in 0..self.config.batch_size {
-                // have to structure like this to not hold mutex over await
-                let id = {
-                    let mut store = self.store.lock();
-                    match store.ids.pop() {
-                        Some(id) if !store.in_flight.contains_key(&id) => Some(id),
-                        _ => None,
-                    }
-                };
-                if let Some(next_id) = id {
-                    let msg = QueryGen::gen(next_id, self.config.record.clone(), self.config.qtype);
-                    self.s.send_to(&msg.to_vec()?[..], self.config.addr).await?;
-                }
-            }
-            // tokio::task::yield_now().await;
-            tokio::time::sleep(self.config.delay_ms).await;
-        }
-    }
+struct StatsTracker {
+    recv: u128,
+    latency: Duration,
 }
 
 // create a stack array of random u16's
@@ -172,15 +156,27 @@ fn create_and_shuffle() -> Vec<u16> {
     data
 }
 
-#[derive(Debug)]
-pub(crate) struct QueryGen;
+impl TryFrom<&Args> for Config {
+    type Error = anyhow::Error;
 
-impl QueryGen {
-    pub(crate) fn gen(id: u16, record: Name, qtype: RecordType) -> Message {
-        let mut msg = Message::new();
-        msg.set_id(id)
-            .add_query(Query::query(record, qtype))
-            .set_message_type(MessageType::Query);
-        msg
+    fn try_from(args: &Args) -> Result<Self, Self::Error> {
+        Ok(Self {
+            protocol: args.protocol,
+            addr: (args.ip, args.port).into(),
+            record: Name::from_ascii(&args.record).map_err(|err| {
+                anyhow!(
+                    "failed to parse record: {:?}. with error: {:?}",
+                    args.record,
+                    err
+                )
+            })?,
+            qtype: args.qtype,
+            qps: args.qps,
+            delay_ms: Duration::from_millis(args.delay_ms),
+            timeout: Duration::from_secs(args.timeout),
+            // TODO: in flamethrower batch is decided by protocol
+            batch_size: 1000,
+            file: args.file.clone(),
+        })
     }
 }

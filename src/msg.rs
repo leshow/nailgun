@@ -67,7 +67,7 @@ impl BufMsg {
     // TODO: if you use this, use a shared BytesMut so we don't have to do the extra
     // alloc, or remove Bytes altogether
     // Receive a `SerialMsg` from any new `UdpRecv`
-    // pub async fn recv<S>(stream: &S) -> io::Result<Self>
+    // pub(crate) async fn recv<S>(stream: &S) -> io::Result<Self>
     // where
     //     S: Borrow<UdpSocket>,
     // {

@@ -1,12 +1,8 @@
 use anyhow::{anyhow, Error};
 use clap::Clap;
-use once_cell::sync::Lazy;
 use trust_dns_proto::rr::RecordType;
 
 use std::{net::IpAddr, path::PathBuf, str::FromStr};
-
-// TODO: this kinda sucks. argh didn't need this. switch back?
-static NUM_CPU: Lazy<String> = Lazy::new(|| num_cpus::get().to_string());
 
 /// nailgun is a small, fast, configurable tool for functional testing,
 /// benchmarking, and stress testing DNS servers and networks. It supports IPv4,
