@@ -1,4 +1,4 @@
-# nailgun
+# nailgun (WIP)
 
 `nailgun` is a DNS performance testing client in the vein of flamethrower or dnsperf but written in Rust using `trust-dns` and `tokio`.
 
