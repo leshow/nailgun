@@ -100,6 +100,8 @@ impl Generator {
         let mut stats = StatsTracker {
             recv: 0,
             latency: Duration::from_millis(0),
+            min_latency: Duration::from_millis(0),
+            max_latency: Duration::from_millis(0),
         };
 
         while !self.shutdown.is_shutdown() {
@@ -115,20 +117,23 @@ impl Generator {
                         let mut store = store.lock();
                         if let Some(qinfo) = store.in_flight.remove(&id) {
                             store.ids.push(id);
-                            stats.recv += 1;
-                            stats.latency += StdInstant::now().duration_since(qinfo.sent);
+                            stats.update(qinfo.sent);
                         }
                     }
                 },
                 () = &mut sleep => {
                     let now = Instant::now();
-                    if stats.recv != 0 {
-                        let elapsed = now.duration_since(interval);
-                        interval = now;
-                        info!("elapsed {}s recv {} avg latency {}", &elapsed.as_secs_f32().to_string()[0..4], stats.recv, stats.latency.as_millis() / stats.recv);
-                        stats.recv = 0;
-                        stats.latency = Duration::from_millis(0);
-                    }
+                    let elapsed = now.duration_since(interval);
+                    interval = now;
+                    info!(
+                        "elapsed: {}s recv: {} avg_latency: {}ms min_latency: {}ms max_latency: {}ms",
+                        &elapsed.as_secs_f32().to_string()[0..4],
+                        stats.recv,
+                        stats.avg_latency(),
+                        stats.min_latency.as_millis(),
+                        stats.max_latency.as_millis()
+                    );
+                    stats.reset();
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
                 _ = self.shutdown.recv() => {
@@ -147,6 +152,36 @@ impl Generator {
 struct StatsTracker {
     recv: u128,
     latency: Duration,
+    min_latency: Duration,
+    max_latency: Duration,
+}
+
+impl StatsTracker {
+    fn reset(&mut self) {
+        *self = StatsTracker {
+            recv: 0,
+            latency: Duration::from_millis(0),
+            min_latency: Duration::from_millis(u64::max_value()),
+            max_latency: Duration::from_millis(0),
+        };
+    }
+
+    fn avg_latency(&self) -> String {
+        if self.recv != 0 {
+            (self.latency.as_millis() / self.recv).to_string()
+        } else {
+            "--".to_string()
+        }
+    }
+
+    fn update(&mut self, sent: StdInstant) {
+        use std::cmp;
+        self.recv += 1;
+        let recv = StdInstant::now().duration_since(sent);
+        self.latency += recv;
+        self.min_latency = cmp::min(self.min_latency, recv);
+        self.max_latency = cmp::max(self.max_latency, recv);
+    }
 }
 
 // create a stack array of random u16's
