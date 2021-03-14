@@ -1,9 +1,10 @@
 use std::{
+    borrow::Cow,
     convert::TryFrom,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::Arc,
-    time::{Duration, Instant as StdInstant},
+    sync::{atomic::AtomicUsize, Arc},
+    time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -13,7 +14,7 @@ use rustc_hash::FxHashMap;
 use tokio::{
     net::UdpSocket,
     sync::mpsc,
-    task::yield_now,
+    task,
     time::{self, Instant},
 };
 use tokio_stream::StreamExt;
@@ -67,6 +68,26 @@ pub(crate) struct Store {
     pub(crate) ids: Vec<u16>,
     pub(crate) in_flight: FxHashMap<u16, QueryInfo>,
 }
+impl Store {
+    pub(crate) fn new() -> Self {
+        Self {
+            in_flight: FxHashMap::default(),
+            ids: create_and_shuffle(),
+        }
+    }
+}
+#[derive(Debug)]
+pub(crate) struct AtomicStore {
+    pub(crate) count: AtomicUsize,
+}
+
+impl AtomicStore {
+    pub(crate) fn new() -> Self {
+        Self {
+            count: AtomicUsize::new(0),
+        }
+    }
+}
 
 impl Generator {
     pub(crate) async fn run(&mut self) -> Result<()> {
@@ -77,15 +98,14 @@ impl Generator {
         };
         let r = Arc::new(UdpSocket::bind(src).await?);
         let s = Arc::clone(&r);
-        let store = Arc::new(Mutex::new(Store {
-            in_flight: FxHashMap::default(),
-            ids: create_and_shuffle(),
-        }));
+        let store = Arc::new(Mutex::new(Store::new()));
+        let atomic_store = Arc::new(AtomicStore::new());
 
-        let sender = UdpSender {
+        let mut sender = UdpSender {
             config: self.config.clone(),
             s,
             store: store.clone(),
+            atomic_store: atomic_store.clone(),
         };
         let sender_handle = tokio::spawn(async move {
             if let Err(err) = sender.run().await {
@@ -96,6 +116,7 @@ impl Generator {
         let mut recv = UdpFramedRecv::new(r, BytesCodec::new());
         let sleep = time::sleep(Duration::from_secs(1));
         let mut interval = Instant::now();
+        let mut total_duration = Duration::from_millis(0);
         tokio::pin!(sleep);
         let mut stats = StatsTracker {
             recv: 0,
@@ -124,16 +145,20 @@ impl Generator {
                 () = &mut sleep => {
                     let now = Instant::now();
                     let elapsed = now.duration_since(interval);
+                    total_duration += elapsed;
                     interval = now;
                     info!(
-                        "elapsed: {}s recv: {} avg_latency: {}ms min_latency: {}ms max_latency: {}ms",
+                        "elapsed: {}s recv: {} avg_latency: {}ms min_latency: {}ms max_latency: {}ms total_duration: {}s",
                         &elapsed.as_secs_f32().to_string()[0..4],
                         stats.recv,
                         stats.avg_latency(),
                         stats.min_latency.as_millis(),
-                        stats.max_latency.as_millis()
+                        stats.max_latency.as_millis(),
+                        &total_duration.as_secs_f32().to_string()[0..4],
+
                     );
                     stats.reset();
+                    // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
                 _ = self.shutdown.recv() => {
@@ -144,6 +169,9 @@ impl Generator {
                 }
             }
         }
+        // TODO: do something with this
+        // total_duration
+
         Ok(())
     }
 }
@@ -166,21 +194,20 @@ impl StatsTracker {
         };
     }
 
-    fn avg_latency(&self) -> String {
+    fn avg_latency(&self) -> Cow<'static, str> {
         if self.recv != 0 {
-            (self.latency.as_millis() / self.recv).to_string()
+            Cow::Owned((self.latency.as_millis() / self.recv).to_string())
         } else {
-            "--".to_string()
+            Cow::Borrowed("-")
         }
     }
 
     fn update(&mut self, sent: StdInstant) {
-        use std::cmp;
         self.recv += 1;
         let recv = StdInstant::now().duration_since(sent);
         self.latency += recv;
-        self.min_latency = cmp::min(self.min_latency, recv);
-        self.max_latency = cmp::max(self.max_latency, recv);
+        self.min_latency = self.min_latency.min(recv);
+        self.max_latency = self.max_latency.max(recv);
     }
 }
 

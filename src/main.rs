@@ -22,8 +22,10 @@ use tokio::{
 use tracing::{error, info, trace};
 
 mod args;
+mod bucket;
 mod gen;
 mod msg;
+mod query;
 mod sender;
 mod shutdown;
 
