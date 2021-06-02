@@ -30,6 +30,7 @@ use crate::{
     sender::UdpSender,
     shutdown::Shutdown,
 };
+use tokenbucket::TokenBucket;
 
 #[derive(Debug)]
 pub(crate) struct Generator {
@@ -104,8 +105,9 @@ impl Generator {
         let mut sender = UdpSender {
             config: self.config.clone(),
             s,
-            store: store.clone(),
-            atomic_store: atomic_store.clone(),
+            store,
+            atomic_store,
+            bucket: TokenBucket::new(todo!()),
         };
         let sender_handle = tokio::spawn(async move {
             if let Err(err) = sender.run().await {

@@ -48,8 +48,8 @@ pub(crate) struct Args {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Protocol {
-    UDP,
-    TCP, // DOH
+    Udp,
+    Tcp, // DOH
 }
 
 impl FromStr for Protocol {
@@ -57,8 +57,8 @@ impl FromStr for Protocol {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.to_ascii_lowercase()[..] {
-            "udp" => Ok(Protocol::UDP),
-            "tcp" => Ok(Protocol::TCP),
+            "udp" => Ok(Protocol::Udp),
+            "tcp" => Ok(Protocol::Tcp),
             _ => Err(anyhow!(
                 "unknown protocol type: {:?} must be \"udp\" or \"tcp\"",
                 s

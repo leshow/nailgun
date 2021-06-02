@@ -1,0 +1,36 @@
+[package]
+name = "nailgun"
+version = "0.1.0"
+authors = ["Evan Cameron <cameron.evan@gmail.com>"]
+edition = "2018"
+description = """
+nailgun is a small, fast, configurable tool for functional testing,
+benchmarking, and stress testing DNS servers and networks. It supports IPv4,
+IPv6, UDP, TCP, and DoT (someday) and has a modular system for generating queries used
+in the tests
+"""
+categories = ["command-line-utilities", "asynchronous", "network-programming"]
+keywords = ["dns", "performance", "testing"]
+repository = "https://github.com/leshow/nailgun"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+clap = "3.0.0-beta.2"
+bytes = "1.0"
+num_cpus = "1.13.0"
+tokio = { version = "1.2", features = ["full"] }
+tokio-util = "0.6"
+tokio-stream = "0.1"
+tokio-udp-framed = "0.1.0"
+trust-dns-proto = { version = "0.20.0", features = ["dnssec"] }
+tracing = "0.1.23"
+tracing-subscriber = "0.2.15"
+tracing-futures = "0.2.4"
+parking_lot = "0.11.1"
+rustc-hash = "1.1.0"
+rand = "0.8"
+# local deps
+tokenbucket = { path = "../tokenbucket" }

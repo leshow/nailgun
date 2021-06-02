@@ -1,13 +1,14 @@
 use std::time::Instant;
 
-pub(crate) struct TokenBucket {
+#[derive(Debug)]
+pub struct TokenBucket {
     qps: f64,
     wallet: u64,
     last_fill: Option<Instant>,
 }
 
 impl TokenBucket {
-    pub(crate) fn new(qps: f64) -> Self {
+    pub fn new(qps: f64) -> Self {
         Self {
             qps,
             wallet: 0,
@@ -15,7 +16,7 @@ impl TokenBucket {
         }
     }
 
-    pub(crate) fn consume(&mut self, tokens: u64, now: Instant) -> bool {
+    pub fn consume(&mut self, tokens: u64, now: Instant) -> bool {
         if self.wallet < tokens {
             match self.last_fill {
                 None => {
