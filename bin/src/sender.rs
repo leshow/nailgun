@@ -14,16 +14,16 @@ use crate::{
 use tokenbucket::TokenBucket;
 
 #[derive(Debug)]
-pub(crate) struct UdpSender {
-    pub(crate) config: Config,
-    pub(crate) s: Arc<UdpSocket>,
-    pub(crate) store: Arc<Mutex<Store>>,
-    pub(crate) atomic_store: Arc<AtomicStore>,
-    pub(crate) bucket: TokenBucket,
+pub struct UdpSender {
+    pub config: Config,
+    pub s: Arc<UdpSocket>,
+    pub store: Arc<Mutex<Store>>,
+    pub atomic_store: Arc<AtomicStore>,
+    pub bucket: TokenBucket,
 }
 
 impl UdpSender {
-    pub(crate) async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         loop {
             for _ in 0..self.config.batch_size {
                 self.bucket.consume(1, Instant::now());

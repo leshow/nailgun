@@ -3,40 +3,40 @@ use std::{io, net::SocketAddr};
 use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(crate) struct BufMsg {
+pub struct BufMsg {
     buf: Bytes,
     addr: SocketAddr,
 }
 
 impl BufMsg {
     /// Construct a new `SerialMsg` and the source or destination address
-    pub(crate) fn new(buf: Bytes, addr: SocketAddr) -> Self {
+    pub fn new(buf: Bytes, addr: SocketAddr) -> Self {
         BufMsg { buf, addr }
     }
 
     /// Get a reference to the bytes
-    pub(crate) fn bytes(&self) -> &[u8] {
+    pub fn bytes(&self) -> &[u8] {
         &self.buf
     }
 
     /// Get the source or destination address (context dependent)
-    pub(crate) fn addr(&self) -> SocketAddr {
+    pub fn addr(&self) -> SocketAddr {
         self.addr
     }
 
     /// Get dns message id from the buffer
-    pub(crate) fn msg_id(&self) -> u16 {
+    pub fn msg_id(&self) -> u16 {
         u16::from_be_bytes([self.buf[0], self.buf[1]])
     }
 
     /// Get the response code from the byte buffer (not using edns)
-    pub(crate) fn r_code(&self) -> u8 {
+    pub fn r_code(&self) -> u8 {
         let qr_to_rcode = u8::from_be_bytes([self.buf[3]]);
         0b0000_1111 & qr_to_rcode
     }
 
     /// create a new `SerialMsg` from any `AsyncReadExt`
-    pub(crate) async fn read<S>(stream: &mut S, src: SocketAddr) -> io::Result<Self>
+    pub async fn read<S>(stream: &mut S, src: SocketAddr) -> io::Result<Self>
     where
         S: Unpin + AsyncReadExt,
     {
@@ -51,7 +51,7 @@ impl BufMsg {
     }
 
     /// write a `SerialMsg` to any `AsyncWriteExt`
-    pub(crate) async fn write<S>(&self, stream: &mut S) -> io::Result<usize>
+    pub async fn write<S>(&self, stream: &mut S) -> io::Result<usize>
     where
         S: Unpin + AsyncWriteExt,
     {
@@ -67,7 +67,7 @@ impl BufMsg {
     // TODO: if you use this, use a shared BytesMut so we don't have to do the extra
     // alloc, or remove Bytes altogether
     // Receive a `SerialMsg` from any new `UdpRecv`
-    // pub(crate) async fn recv<S>(stream: &S) -> io::Result<Self>
+    // pub async fn recv<S>(stream: &S) -> io::Result<Self>
     // where
     //     S: Borrow<UdpSocket>,
     // {

@@ -1,8 +1,7 @@
 #![warn(
     missing_debug_implementations,
-    // missing_docs, // we shall remove thee, someday!
+    // missing_docs, // TODO
     rust_2018_idioms,
-    unreachable_pub,
     non_snake_case,
     non_upper_case_globals
 )]
@@ -98,7 +97,7 @@ async fn sig() -> Result<()> {
 }
 
 #[derive(Debug)]
-pub(crate) struct Runner {
+pub struct Runner {
     args: Args,
     notify_shutdown: broadcast::Sender<()>,
     shutdown_complete_rx: mpsc::Receiver<()>,
@@ -106,7 +105,7 @@ pub(crate) struct Runner {
 }
 
 impl Runner {
-    pub(crate) async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let len = self.args.wcount * self.args.tcount;
         let mut handles = Vec::with_capacity(len);
 

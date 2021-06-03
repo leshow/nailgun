@@ -33,44 +33,44 @@ use crate::{
 use tokenbucket::TokenBucket;
 
 #[derive(Debug)]
-pub(crate) struct Generator {
-    pub(crate) config: Config,
-    pub(crate) shutdown: Shutdown,
-    pub(crate) _shutdown_complete: mpsc::Sender<()>,
+pub struct Generator {
+    pub config: Config,
+    pub shutdown: Shutdown,
+    pub _shutdown_complete: mpsc::Sender<()>,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Config {
-    pub(crate) protocol: Protocol,
-    pub(crate) addr: SocketAddr,
-    pub(crate) record: Name,
-    pub(crate) qtype: RecordType,
-    pub(crate) qps: usize,
-    pub(crate) delay_ms: Duration,
-    pub(crate) timeout: Duration,
-    pub(crate) batch_size: usize,
-    pub(crate) file: Option<PathBuf>,
+pub struct Config {
+    pub protocol: Protocol,
+    pub addr: SocketAddr,
+    pub record: Name,
+    pub qtype: RecordType,
+    pub qps: usize,
+    pub delay_ms: Duration,
+    pub timeout: Duration,
+    pub batch_size: usize,
+    pub file: Option<PathBuf>,
 }
 
 #[derive(Debug)]
-pub(crate) struct Info {
+pub struct Info {
     elapsed: Duration,
     in_flight: usize,
     timeouts: usize,
 }
 
 #[derive(Debug)]
-pub(crate) struct QueryInfo {
-    pub(crate) sent: StdInstant,
+pub struct QueryInfo {
+    pub sent: StdInstant,
 }
 
 #[derive(Debug)]
-pub(crate) struct Store {
-    pub(crate) ids: Vec<u16>,
-    pub(crate) in_flight: FxHashMap<u16, QueryInfo>,
+pub struct Store {
+    pub ids: Vec<u16>,
+    pub in_flight: FxHashMap<u16, QueryInfo>,
 }
 impl Store {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             in_flight: FxHashMap::default(),
             ids: create_and_shuffle(),
@@ -78,12 +78,12 @@ impl Store {
     }
 }
 #[derive(Debug)]
-pub(crate) struct AtomicStore {
-    pub(crate) count: AtomicUsize,
+pub struct AtomicStore {
+    pub count: AtomicUsize,
 }
 
 impl AtomicStore {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             count: AtomicUsize::new(0),
         }
@@ -91,7 +91,7 @@ impl AtomicStore {
 }
 
 impl Generator {
-    pub(crate) async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         // choose src based on addr
         let src: SocketAddr = match self.config.addr {
             SocketAddr::V4(_) => ([0, 0, 0, 0], 0).into(),
