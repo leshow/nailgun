@@ -1,5 +1,3 @@
-use std::sync::mpsc::SendError;
-
 use thiserror::Error;
 
 /// Error type
@@ -8,5 +6,9 @@ pub enum Error {
     #[error("TokenBucket is already running")]
     AlreadyRunning,
     #[error("error during channel send")]
-    ChannelError(#[from] SendError<()>),
+    ChannelError(#[from] crossbeam_channel::SendError<()>),
+    #[error("error during channel recv")]
+    RecvError(#[from] crossbeam_channel::RecvError),
+    #[error("checked division on time failed")]
+    DivError,
 }
