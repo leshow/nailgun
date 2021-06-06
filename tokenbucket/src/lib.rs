@@ -9,6 +9,7 @@
 #![allow(clippy::cognitive_complexity)]
 
 use std::{
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -16,6 +17,7 @@ use std::{
 pub mod error;
 use crossbeam_channel::{Receiver, Sender};
 use error::Error;
+use tokio::sync::Semaphore;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -90,6 +92,16 @@ impl Builder {
             rx,
         }
     }
+
+    pub fn build_async(&mut self) -> AsyncTokenBucket {
+        let semaphore = Arc::new(Semaphore::new(self.capacity));
+        AsyncTokenBucket {
+            semaphore,
+            capacity: self.capacity,
+            rate: self.rate,
+            interval: self.interval,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -97,12 +109,61 @@ pub struct AsyncTokenBucket {
     capacity: usize,
     rate: usize,
     interval: Duration,
+    semaphore: Arc<Semaphore>,
+}
+
+#[derive(Debug)]
+pub struct AsyncTokenRunner {
+    semaphore: Arc<Semaphore>,
+    capacity: usize,
+    rate: usize,
+    interval: Duration,
+}
+
+impl AsyncTokenRunner {
+    pub async fn run(self) -> Result<()> {
+        let mut interval = tokio::time::interval(self.interval);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            if self.rate > self.semaphore.available_permits() {
+                self.semaphore
+                    .add_permits(self.semaphore.available_permits());
+            } else {
+                self.semaphore.add_permits(self.rate);
+            }
+        }
+    }
 }
 
 // use semaphore instead of channels?
-impl AsyncTokenBucket {}
+impl AsyncTokenBucket {
+    pub fn runner(&mut self) -> AsyncTokenRunner {
+        AsyncTokenRunner {
+            semaphore: self.semaphore.clone(),
+            capacity: self.capacity,
+            rate: self.rate,
+            interval: self.interval,
+        }
+    }
 
-#[derive(Debug)]
+    pub async fn tokens(&self, count: u32) -> Result<()> {
+        // TODO: this is not going to work
+        self.semaphore.acquire_many(count).await?;
+        Ok(())
+    }
+
+    pub async fn token(&self) -> Result<()> {
+        self.semaphore.acquire().await?;
+        Ok(())
+    }
+}
+
+/// A simple blocking token bucket implementation that will
+/// fill up with a `rate` number of tokens every `interval`.
+/// If the bucket overfills, the unspent tokens are *not*
+/// saved.
+#[derive(Debug, Clone)]
 pub struct TokenBucket {
     capacity: usize,
     rate: usize,
@@ -125,7 +186,9 @@ impl TokenRunner {
         let mut diff = Duration::from_secs(0);
         loop {
             // subtract previous extra time to adjust interval
-            thread::sleep(self.interval - diff);
+            if self.interval > diff {
+                thread::sleep(self.interval - diff);
+            } // TODO: else if the diff is larger we probably want to add more tokens?
             self.start = Instant::now();
             // fill queue with next rate
             for _ in 0..self.rate {
@@ -142,14 +205,16 @@ impl TokenBucket {
     /// use std::thread;
     /// use tokenbucket::Builder;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let bucket = Builder::new()
+    ///     let mut bucket = Builder::new()
     ///         .capacity(10)
     ///         .rate(10)
     ///         .interval_secs(1)
     ///         .build();
-    ///     let runner = bucket.runner();
+    ///     let runner = bucket.runner()?;
     ///     thread::spawn(move || { runner.run().expect("token bucket task failed") });
-    ///      
+    ///     // first will be available immediately
+    ///     bucket.tokens(10);
+    ///     // the next will take a second
     ///     bucket.tokens(10);
     /// # Ok(())
     /// }
@@ -167,16 +232,13 @@ impl TokenBucket {
             tx.send(())?;
         }
 
-        let runner = TokenRunner {
+        Ok(TokenRunner {
             rate: self.rate,
             capacity: self.capacity,
             interval: self.interval,
-            // unspent: 0,
             start: Instant::now(), // dummy value will be overrided on run()
             tx,
-        };
-
-        Ok(runner)
+        })
     }
 
     pub fn tokens(&self, count: usize) -> Result<()> {

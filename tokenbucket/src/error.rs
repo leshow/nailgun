@@ -11,4 +11,6 @@ pub enum Error {
     RecvError(#[from] crossbeam_channel::RecvError),
     #[error("checked division on time failed")]
     DivError,
+    #[error("semaphore error")]
+    SemaphoreError(#[from] tokio::sync::AcquireError),
 }
