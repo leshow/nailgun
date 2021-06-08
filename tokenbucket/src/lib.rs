@@ -121,14 +121,16 @@ pub struct AsyncTokenRunner {
 }
 
 impl AsyncTokenRunner {
+    /// start runner, will add `rate` tokens every `interval`
     pub async fn run(self) -> Result<()> {
         let mut interval = tokio::time::interval(self.interval);
         interval.tick().await;
         loop {
             interval.tick().await;
-            if self.rate > self.semaphore.available_permits() {
-                self.semaphore
-                    .add_permits(self.semaphore.available_permits());
+            let permits = self.semaphore.available_permits();
+            if permits + self.rate > self.capacity {
+                // top up the permits
+                self.semaphore.add_permits(self.capacity - permits);
             } else {
                 self.semaphore.add_permits(self.rate);
             }
@@ -136,8 +138,8 @@ impl AsyncTokenRunner {
     }
 }
 
-// use semaphore instead of channels?
 impl AsyncTokenBucket {
+    /// Create a new async runner
     pub fn runner(&mut self) -> AsyncTokenRunner {
         AsyncTokenRunner {
             semaphore: self.semaphore.clone(),
@@ -147,14 +149,17 @@ impl AsyncTokenBucket {
         }
     }
 
-    pub async fn tokens(&self, count: u32) -> Result<()> {
-        // TODO: this is not going to work
-        self.semaphore.acquire_many(count).await?;
+    /// Acquire `n` tokens
+    pub async fn tokens(&self, n: u32) -> Result<()> {
+        // acquire `n` tokens and forget to reduce the permit count
+        // permits will be added back in `AsyncTokenRunner`
+        self.semaphore.acquire_many(n).await?.forget();
         Ok(())
     }
 
+    /// Acquire a token
     pub async fn token(&self) -> Result<()> {
-        self.semaphore.acquire().await?;
+        self.semaphore.acquire().await?.forget();
         Ok(())
     }
 }
@@ -241,8 +246,8 @@ impl TokenBucket {
         })
     }
 
-    pub fn tokens(&self, count: usize) -> Result<()> {
-        for _ in 0..count {
+    pub fn tokens(&self, n: usize) -> Result<()> {
+        for _ in 0..n {
             self.token()?;
         }
         Ok(())
@@ -283,6 +288,42 @@ mod tests {
         // the next 10 must be filled
         let t0 = Instant::now();
         bucket.tokens(10)?;
+        assert_eq!(
+            Instant::now().duration_since(t0).as_secs(),
+            Duration::from_secs(1).as_secs()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn async_test_interval() -> Result<()> {
+        let mut bucket = Builder::new()
+            .capacity(10)
+            .rate(10)
+            .interval_secs(1)
+            .build_async();
+        let runner = bucket.runner();
+        tokio::spawn(async move { runner.run().await });
+        // we start with 10 prefilled
+        let t0 = Instant::now();
+        bucket.tokens(10).await?;
+        dbg!("a");
+        assert_eq!(
+            Instant::now().duration_since(t0).as_secs(),
+            Duration::from_secs(0).as_secs()
+        );
+        // the next 10 must be filled
+        let t0 = Instant::now();
+        bucket.tokens(10).await?;
+        dbg!("b");
+        assert_eq!(
+            Instant::now().duration_since(t0).as_secs(),
+            Duration::from_secs(1).as_secs()
+        );
+        // the next 10 must be filled
+        let t0 = Instant::now();
+        bucket.tokens(10).await?;
+        dbg!("c");
         assert_eq!(
             Instant::now().duration_since(t0).as_secs(),
             Duration::from_secs(1).as_secs()
