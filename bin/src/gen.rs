@@ -30,7 +30,7 @@ use crate::{
     sender::UdpSender,
     shutdown::Shutdown,
 };
-use tokenbucket::TokenBucket;
+use tokenbucket::{AsyncTokenBucket, Builder};
 
 #[derive(Debug)]
 pub struct Generator {
@@ -48,7 +48,7 @@ pub struct Config {
     pub qps: usize,
     pub delay_ms: Duration,
     pub timeout: Duration,
-    pub batch_size: usize,
+    pub batch_size: u32,
     pub file: Option<PathBuf>,
 }
 
@@ -102,12 +102,21 @@ impl Generator {
         let store = Arc::new(Mutex::new(Store::new()));
         let atomic_store = Arc::new(AtomicStore::new());
 
+        // start token bucket
+        let mut bucket = Builder::new()
+            .capacity(self.config.qps)
+            .rate(self.config.qps)
+            .interval_secs(1)
+            .build_async();
+        let runner = bucket.runner();
+        tokio::spawn(async move { runner.run().await });
+
         let mut sender = UdpSender {
             config: self.config.clone(),
             s,
-            store,
+            store: store.clone(),
             atomic_store,
-            bucket: TokenBucket::new(todo!()),
+            bucket,
         };
         let sender_handle = tokio::spawn(async move {
             if let Err(err) = sender.run().await {

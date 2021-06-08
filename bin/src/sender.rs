@@ -11,7 +11,7 @@ use crate::{
     gen::{AtomicStore, Config, QueryInfo, Store},
     query,
 };
-use tokenbucket::TokenBucket;
+use tokenbucket::AsyncTokenBucket;
 
 #[derive(Debug)]
 pub struct UdpSender {
@@ -19,14 +19,14 @@ pub struct UdpSender {
     pub s: Arc<UdpSocket>,
     pub store: Arc<Mutex<Store>>,
     pub atomic_store: Arc<AtomicStore>,
-    pub bucket: TokenBucket,
+    pub bucket: AsyncTokenBucket,
 }
 
 impl UdpSender {
     pub async fn run(&mut self) -> Result<()> {
         loop {
+            self.bucket.tokens(self.config.batch_size).await;
             for _ in 0..self.config.batch_size {
-                self.bucket.consume(1, Instant::now());
                 // have to structure like this to not hold mutex over await
                 let id = {
                     let mut store = self.store.lock();
