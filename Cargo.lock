@@ -284,6 +284,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
+name = "leaky-bucket"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d96392400fa7340b9ee203a83c6978790929eec36a20feb6fa8155408fbd800"
+dependencies = [
+ "parking_lot",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -357,6 +368,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap",
+ "leaky-bucket",
  "num_cpus",
  "parking_lot",
  "rand",
@@ -364,7 +376,6 @@ dependencies = [
  "tokenbucket",
  "tokio",
  "tokio-stream",
- "tokio-udp-framed",
  "tokio-util",
  "tracing",
  "tracing-futures",
@@ -799,21 +810,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
-]
-
-[[package]]
-name = "tokio-udp-framed"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ec68ac2c2ef0f6767cb800842d6ff899f3a1096ca69905c6761130c4be8befb"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-sink",
- "pin-project-lite",
- "tokio",
- "tokio-stream",
- "tokio-util",
 ]
 
 [[package]]

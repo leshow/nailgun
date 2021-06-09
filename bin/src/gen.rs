@@ -18,11 +18,9 @@ use tokio::{
     time::{self, Instant},
 };
 use tokio_stream::StreamExt;
-use tokio_util::codec::BytesCodec;
+use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{error, info, trace};
 use trust_dns_proto::rr::{Name, RecordType};
-// this one is my very own:
-use tokio_udp_framed::UdpFramedRecv;
 
 use crate::{
     args::{Args, Protocol},
@@ -30,7 +28,7 @@ use crate::{
     sender::UdpSender,
     shutdown::Shutdown,
 };
-use tokenbucket::{AsyncTokenBucket, Builder};
+use tokenbucket::Builder;
 
 #[derive(Debug)]
 pub struct Generator {
@@ -105,11 +103,11 @@ impl Generator {
         // start token bucket
         let mut bucket = Builder::new()
             .capacity(self.config.qps)
-            .rate(self.config.qps)
-            .interval_secs(1)
+            .rate(self.config.qps / 10)
+            .interval_millis(100)
             .build_async();
         let runner = bucket.runner();
-        tokio::spawn(async move { runner.run().await });
+        let token_handle = tokio::spawn(async move { runner.run().await });
 
         let mut sender = UdpSender {
             config: self.config.clone(),
@@ -124,7 +122,7 @@ impl Generator {
             }
         });
 
-        let mut recv = UdpFramedRecv::new(r, BytesCodec::new());
+        let mut recv = UdpFramed::new(r, BytesCodec::new());
         let sleep = time::sleep(Duration::from_secs(1));
         let mut interval = Instant::now();
         let mut total_duration = Duration::from_millis(0);
@@ -152,6 +150,7 @@ impl Generator {
                             stats.update(qinfo.sent);
                         }
                     }
+                    stats.recv += 1;
                 },
                 () = &mut sleep => {
                     let now = Instant::now();
@@ -176,6 +175,7 @@ impl Generator {
                     // kill sender task
                     trace!("shutdown received");
                     sender_handle.abort();
+                    token_handle.abort();
                     return Ok(());
                 }
             }
@@ -214,11 +214,10 @@ impl StatsTracker {
     }
 
     fn update(&mut self, sent: StdInstant) {
-        self.recv += 1;
-        let recv = StdInstant::now().duration_since(sent);
-        self.latency += recv;
-        self.min_latency = self.min_latency.min(recv);
-        self.max_latency = self.max_latency.max(recv);
+        let latency = StdInstant::now().duration_since(sent);
+        self.latency += latency;
+        self.min_latency = self.min_latency.min(latency);
+        self.max_latency = self.max_latency.max(latency);
     }
 }
 

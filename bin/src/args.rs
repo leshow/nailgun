@@ -17,7 +17,7 @@ pub struct Args {
     #[clap(long, short = 'p', default_value = "53")]
     pub port: u16,
     /// delay between each traffic generator's run in milliseconds
-    #[clap(long, short = 'd', default_value = "1")]
+    #[clap(long, short = 'd', default_value = "0")]
     pub delay_ms: u64,
     /// the base record to use as the query for generators
     #[clap(long, short = 'r', default_value = "test.com.")]
