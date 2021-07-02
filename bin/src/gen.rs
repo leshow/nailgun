@@ -1,20 +1,23 @@
 use std::{
     borrow::Cow,
+    collections::VecDeque,
     convert::TryFrom,
     net::{IpAddr, SocketAddr},
+    num::NonZeroU32,
     path::PathBuf,
     sync::{atomic::AtomicUsize, Arc},
     time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{anyhow, Context, Result};
+use governor::{Quota, RateLimiter};
 use parking_lot::Mutex;
 use rand::{seq::SliceRandom, thread_rng};
 use rustc_hash::FxHashMap;
 use tokio::{
     net::UdpSocket,
     sync::mpsc,
-    task,
+    task::{self, JoinHandle},
     time::{self, Instant},
 };
 use tokio_stream::StreamExt;
@@ -43,18 +46,38 @@ pub struct Config {
     pub addr: SocketAddr,
     pub record: Name,
     pub qtype: RecordType,
-    pub qps: usize,
+    pub qps: u32,
     pub delay_ms: Duration,
     pub timeout: Duration,
-    pub batch_size: u32,
     pub file: Option<PathBuf>,
+    pub generators: usize,
+}
+
+impl Config {
+    pub fn generator_capacity(&self) -> usize {
+        if self.qps == 0 {
+            0
+        } else {
+            self.qps as usize / self.generators
+        }
+    }
+    pub fn rate(&self) -> usize {
+        self.generator_capacity() / 10
+    }
+    pub fn batch_size(&self) -> u32 {
+        if self.qps == 0 {
+            1_000 // default batch size
+        } else {
+            self.qps
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Info {
     elapsed: Duration,
-    in_flight: usize,
-    timeouts: usize,
+    in_flight: u64,
+    timeouts: u64,
 }
 
 #[derive(Debug)]
@@ -64,7 +87,7 @@ pub struct QueryInfo {
 
 #[derive(Debug)]
 pub struct Store {
-    pub ids: Vec<u16>,
+    pub ids: VecDeque<u16>,
     pub in_flight: FxHashMap<u16, QueryInfo>,
 }
 impl Store {
@@ -99,11 +122,16 @@ impl Generator {
         let s = Arc::clone(&r);
         let store = Arc::new(Mutex::new(Store::new()));
         let atomic_store = Arc::new(AtomicStore::new());
-
         // start token bucket
+        trace!(
+            "building token bucket with capacity {} refilling {} every 100ms",
+            self.config.generator_capacity(),
+            self.config.rate()
+        );
         let mut bucket = Builder::new()
-            .capacity(self.config.qps)
-            .rate(self.config.qps / 10)
+            .initial(0)
+            .capacity(self.config.generator_capacity() as usize)
+            .rate(self.config.rate() as usize)
             .interval_millis(100)
             .build_async();
         let runner = bucket.runner();
@@ -121,6 +149,7 @@ impl Generator {
                 error!(?err, "Error in UDP send task");
             }
         });
+        let cleanup_handle = self.cleanup_task(store.clone());
 
         let mut recv = UdpFramed::new(r, BytesCodec::new());
         let sleep = time::sleep(Duration::from_secs(1));
@@ -145,10 +174,11 @@ impl Generator {
                         let msg = BufMsg::new(buf.freeze(), addr);
                         let id = msg.msg_id();
                         let mut store = store.lock();
+                        store.ids.push_back(id);
                         if let Some(qinfo) = store.in_flight.remove(&id) {
-                            store.ids.push(id);
                             stats.update(qinfo.sent);
                         }
+                        drop(store);
                     }
                     stats.recv += 1;
                 },
@@ -157,14 +187,20 @@ impl Generator {
                     let elapsed = now.duration_since(interval);
                     total_duration += elapsed;
                     interval = now;
+                        let store = store.lock();
+                        let in_flight = store.in_flight.len();
+                        let ids = store.ids.len();
+                        drop(store);
                     info!(
-                        "elapsed: {}s recv: {} avg_latency: {}ms min_latency: {}ms max_latency: {}ms total_duration: {}s",
+                        "elapsed: {}s recv: {} avg_latency: {}ms min_latency: {}ms max_latency: {}ms total_duration: {}s in_flight: {} ids: {}",
                         &elapsed.as_secs_f32().to_string()[0..4],
                         stats.recv,
                         stats.avg_latency(),
                         stats.min_latency.as_millis(),
                         stats.max_latency.as_millis(),
                         &total_duration.as_secs_f32().to_string()[0..4],
+                        in_flight,
+                        ids
 
                     );
                     stats.reset();
@@ -176,6 +212,7 @@ impl Generator {
                     trace!("shutdown received");
                     sender_handle.abort();
                     token_handle.abort();
+                    cleanup_handle.abort();
                     return Ok(());
                 }
             }
@@ -184,6 +221,30 @@ impl Generator {
         // total_duration
 
         Ok(())
+    }
+    fn cleanup_task(&self, store: Arc<Mutex<Store>>) -> JoinHandle<()> {
+        let timeout = self.config.timeout;
+        tokio::spawn(async move {
+            let mut sleep = time::interval(timeout);
+            sleep.tick().await;
+            loop {
+                sleep.tick().await;
+                let mut store = store.lock();
+                let now = StdInstant::now();
+                let mut ids = Vec::new();
+                store.in_flight.retain(|id, info| {
+                    if now - info.sent >= timeout {
+                        ids.push(*id);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                info!("timing out {} ids", ids.len());
+                store.ids.extend(ids);
+                drop(store);
+            }
+        })
     }
 }
 
@@ -222,10 +283,10 @@ impl StatsTracker {
 }
 
 // create a stack array of random u16's
-fn create_and_shuffle() -> Vec<u16> {
+fn create_and_shuffle() -> VecDeque<u16> {
     let mut data: Vec<u16> = (0..u16::max_value()).collect();
     data.shuffle(&mut thread_rng());
-    data
+    VecDeque::from(data)
 }
 
 impl TryFrom<&Args> for Config {
@@ -246,8 +307,8 @@ impl TryFrom<&Args> for Config {
             qps: args.qps,
             delay_ms: Duration::from_millis(args.delay_ms),
             timeout: Duration::from_secs(args.timeout),
+            generators: args.tcount * args.wcount,
             // TODO: in flamethrower batch is decided by protocol
-            batch_size: 1000,
             file: args.file.clone(),
         })
     }

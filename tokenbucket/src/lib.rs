@@ -30,12 +30,14 @@ pub struct Builder {
     capacity: usize,
     rate: usize,
     interval: Duration,
+    initial: usize,
 }
 
 impl Default for Builder {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_CAP,
+            initial: DEFAULT_CAP,
             rate: DEFAULT_RATE,
             interval: DEFAULT_INTERVAL,
         }
@@ -52,7 +54,7 @@ impl Builder {
     ///         .interval_secs(1)
     ///         .build();
     ///     tokio::spawn(async move { bucket.run().await.expect("token bucket task failed") });
-    ///     bucket.wait()
+    ///     bucket.tokens(1).await
     /// }
     /// ```
     pub fn new() -> Self {
@@ -74,6 +76,11 @@ impl Builder {
         self
     }
 
+    pub fn initial(&mut self, initial: usize) -> &mut Self {
+        self.initial = initial;
+        self
+    }
+
     pub fn interval_secs(&mut self, interval: u64) -> &mut Self {
         self.interval(Duration::from_secs(interval))
     }
@@ -83,7 +90,7 @@ impl Builder {
     }
 
     pub fn build(&mut self) -> TokenBucket {
-        let (tx, rx) = crossbeam_channel::bounded(self.capacity);
+        let (tx, rx) = crossbeam_channel::bounded(self.initial);
         TokenBucket {
             capacity: self.capacity,
             rate: self.rate,
@@ -94,7 +101,7 @@ impl Builder {
     }
 
     pub fn build_async(&mut self) -> AsyncTokenBucket {
-        let semaphore = Arc::new(Semaphore::new(self.capacity));
+        let semaphore = Arc::new(Semaphore::new(self.initial));
         AsyncTokenBucket {
             semaphore,
             capacity: self.capacity,

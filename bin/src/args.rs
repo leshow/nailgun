@@ -25,15 +25,15 @@ pub struct Args {
     /// the query type to use for generators. Default is A.
     #[clap(long, short = 'T', default_value = "A")]
     pub qtype: RecordType,
-    /// query timeout in seconds. Default is 3.
-    #[clap(long, short = 't', default_value = "3")]
+    /// query timeout in seconds. Default is 2.
+    #[clap(long, short = 't', default_value = "2")]
     pub timeout: u64,
     /// protocol to use. Default is udp.
     #[clap(long, short = 'P', default_value = "udp")]
     pub protocol: Protocol,
     /// rate limit to a maximum queries per second, 0 is unlimited
     #[clap(long, short = 'Q', default_value = "0")]
-    pub qps: usize,
+    pub qps: u32,
     /// number of concurrent traffic generators per process
     #[clap(long, short = 'c', default_value = "10")]
     pub tcount: usize,
