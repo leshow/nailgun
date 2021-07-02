@@ -118,7 +118,11 @@ impl Runner {
                 // dropped.
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
             };
-            trace!("spawning generator {} with QPS {}", i, gen.config.qps);
+            trace!(
+                "spawning generator {} with QPS {}",
+                i,
+                gen.config.rate_per_gen()
+            );
             let handle = tokio::spawn(async move {
                 if let Err(err) = gen.run().await {
                     error!(?err, "generator exited with error");

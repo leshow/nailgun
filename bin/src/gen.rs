@@ -25,7 +25,6 @@ use tracing::{error, info, trace};
 use trust_dns_proto::rr::Name;
 
 use crate::{args::Args, config::Config, msg::BufMsg, sender::UdpSender, shutdown::Shutdown};
-use tokenbucket::Builder;
 
 #[derive(Debug)]
 pub struct Generator {
@@ -83,23 +82,9 @@ impl Generator {
         let s = Arc::clone(&r);
         let store = Arc::new(Mutex::new(Store::new()));
         let atomic_store = Arc::new(AtomicStore::new());
-        // start token bucket
-        // trace!(
-        //     "building token bucket with capacity {} refilling {} every 1ms",
-        //     self.config.generator_capacity(),
-        //     self.config.rate()
-        // );
-        // let mut bucket = Builder::new()
-        //     .initial(0)
-        //     .capacity(self.config.generator_capacity() as usize)
-        //     .rate(self.config.rate() as usize)
-        //     .interval_millis(1)
-        //     .build_async();
-        // let runner = bucket.runner();
-        // let token_handle = tokio::spawn(async move { runner.run().await });
 
         let bucket = RateLimiter::direct(Quota::per_second(
-            NonZeroU32::new(self.config.qps).expect("QPS is non-zero"),
+            NonZeroU32::new(self.config.rate_per_gen()).expect("QPS is non-zero"),
         ));
 
         let mut sender = UdpSender {
@@ -121,12 +106,7 @@ impl Generator {
         let mut interval = Instant::now();
         let mut total_duration = Duration::from_millis(0);
         tokio::pin!(sleep);
-        let mut stats = StatsTracker {
-            recv: 0,
-            latency: Duration::from_millis(0),
-            min_latency: Duration::from_millis(0),
-            max_latency: Duration::from_millis(0),
-        };
+        let mut stats = StatsTracker::default();
 
         while !self.shutdown.is_shutdown() {
             tokio::select! {
@@ -171,8 +151,6 @@ impl Generator {
                 }
             }
         }
-        // TODO: do something with this
-        // total_duration
 
         Ok(())
     }
@@ -194,7 +172,7 @@ impl Generator {
                         true
                     }
                 });
-                info!("timing out {} ids", ids.len());
+                trace!("timing out {} ids", ids.len());
                 store.ids.extend(ids);
                 drop(store);
             }
@@ -208,15 +186,28 @@ struct StatsTracker {
     latency: Duration,
     min_latency: Duration,
     max_latency: Duration,
+    total_timeouts: u128,
 }
 
+impl Default for StatsTracker {
+    fn default() -> Self {
+        Self {
+            recv: 0,
+            total_timeouts: 0,
+            latency: Duration::from_micros(0),
+            min_latency: Duration::from_micros(0),
+            max_latency: Duration::from_micros(0),
+        }
+    }
+}
 impl StatsTracker {
     fn reset(&mut self) {
         *self = StatsTracker {
             recv: 0,
-            latency: Duration::from_millis(0),
-            min_latency: Duration::from_millis(u64::max_value()),
-            max_latency: Duration::from_millis(0),
+            total_timeouts: 0,
+            latency: Duration::from_micros(0),
+            min_latency: Duration::from_micros(u64::max_value()),
+            max_latency: Duration::from_micros(0),
         };
     }
 
@@ -237,7 +228,7 @@ impl StatsTracker {
     }
 
     fn min_latency(&self) -> f32 {
-        if self.min_latency.as_millis() == u64::max_value() as u128 {
+        if self.min_latency.as_micros() == u64::max_value() as u128 {
             0.
         } else {
             self.min_latency.as_micros() as f32 / 1_000.

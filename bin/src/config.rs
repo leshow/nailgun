@@ -18,20 +18,11 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn generator_capacity(&self) -> usize {
-        if self.qps == 0 {
-            0
-        } else {
-            self.qps as usize / self.generators
-        }
-    }
-
-    pub fn rate(&self) -> usize {
-        // /s -> /ms
-        self.generator_capacity() / 1_000
-    }
-
     pub fn batch_size(&self) -> u32 {
         1_000
+    }
+
+    pub fn rate_per_gen(&self) -> u32 {
+        self.qps / self.generators as u32
     }
 }

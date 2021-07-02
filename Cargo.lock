@@ -460,7 +460,6 @@ dependencies = [
  "parking_lot",
  "rand",
  "rustc-hash",
- "tokenbucket",
  "tokio",
  "tokio-stream",
  "tokio-util",
