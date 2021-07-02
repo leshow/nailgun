@@ -12,7 +12,6 @@ use governor::{
 };
 use parking_lot::Mutex;
 use tokio::{net::UdpSocket, task};
-use tracing::{info, trace};
 
 use crate::{
     config::Config,
@@ -26,7 +25,7 @@ pub struct UdpSender {
     pub s: Arc<UdpSocket>,
     pub store: Arc<Mutex<Store>>,
     pub atomic_store: Arc<AtomicStore>,
-    pub bucket: RateLimiter<NotKeyed, InMemoryState, DefaultClock>,
+    pub bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
 }
 
 impl UdpSender {
@@ -44,9 +43,9 @@ impl UdpSender {
                     .collect::<Vec<_>>()
             };
             for next_id in ids {
-                self.bucket
-                    .until_n_ready(NonZeroU32::new(1).unwrap())
-                    .await?;
+                if let Some(bucket) = &self.bucket {
+                    bucket.until_n_ready(NonZeroU32::new(1).unwrap()).await?;
+                }
                 // TODO: better way to do this that locks less?
                 {
                     self.store.lock().in_flight.insert(
@@ -59,7 +58,7 @@ impl UdpSender {
                 let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype);
                 self.s.send_to(&msg.to_vec()?[..], self.config.addr).await?;
                 self.atomic_store
-                    .count
+                    .sent
                     .fetch_add(1, atomic::Ordering::Relaxed);
             }
         }

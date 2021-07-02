@@ -4,9 +4,7 @@ use trust_dns_proto::rr::RecordType;
 
 use std::{net::IpAddr, path::PathBuf, str::FromStr};
 
-/// nailgun is a small, fast, configurable tool for functional testing,
-/// benchmarking, and stress testing DNS servers and networks. It supports IPv4,
-/// IPv6, UDP, TCP, and DoT (eventually)
+/// nailgun is a cli tool for stress testing and benchmarking DNS
 #[derive(Debug, Clap, Clone, PartialEq, Eq)]
 #[clap(version = "0.1.0", author = "Evan Cameron <cameron.evan@gmail.com>")]
 pub struct Args {
@@ -35,7 +33,7 @@ pub struct Args {
     #[clap(long, short = 'Q', default_value = "0")]
     pub qps: u32,
     /// number of concurrent traffic generators per process
-    #[clap(long, short = 'c', default_value = "10")]
+    #[clap(long, short = 'c', default_value = "1")]
     pub tcount: usize,
     /// number of tokio worker threads to spawn
     #[clap(long, short = 'w', default_value = "1")]

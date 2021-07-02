@@ -26,6 +26,7 @@ mod msg;
 mod query;
 mod sender;
 mod shutdown;
+mod stats;
 
 use crate::{args::Args, config::Config, gen::Generator, shutdown::Shutdown};
 

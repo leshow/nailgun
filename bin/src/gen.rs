@@ -1,15 +1,15 @@
 use std::{
-    borrow::Cow,
     collections::VecDeque,
     convert::TryFrom,
     net::{IpAddr, SocketAddr},
-    num::NonZeroU32,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{self, AtomicU64},
+        Arc,
+    },
     time::{Duration, Instant as StdInstant},
 };
 
 use anyhow::{anyhow, Context, Result};
-use governor::{Quota, RateLimiter};
 use parking_lot::Mutex;
 use rand::{seq::SliceRandom, thread_rng};
 use rustc_hash::FxHashMap;
@@ -24,20 +24,16 @@ use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{error, info, trace};
 use trust_dns_proto::rr::Name;
 
-use crate::{args::Args, config::Config, msg::BufMsg, sender::UdpSender, shutdown::Shutdown};
+use crate::{
+    args::Args, config::Config, msg::BufMsg, sender::UdpSender, shutdown::Shutdown,
+    stats::StatsTracker,
+};
 
 #[derive(Debug)]
 pub struct Generator {
     pub config: Config,
     pub shutdown: Shutdown,
     pub _shutdown_complete: mpsc::Sender<()>,
-}
-
-#[derive(Debug)]
-pub struct Info {
-    elapsed: Duration,
-    in_flight: u64,
-    timeouts: u64,
 }
 
 #[derive(Debug)]
@@ -58,15 +54,18 @@ impl Store {
         }
     }
 }
+
 #[derive(Debug)]
 pub struct AtomicStore {
-    pub count: AtomicUsize,
+    pub sent: AtomicU64,
+    pub timed_out: AtomicU64,
 }
 
 impl AtomicStore {
     pub fn new() -> Self {
         Self {
-            count: AtomicUsize::new(0),
+            sent: AtomicU64::new(0),
+            timed_out: AtomicU64::new(0),
         }
     }
 }
@@ -83,15 +82,12 @@ impl Generator {
         let store = Arc::new(Mutex::new(Store::new()));
         let atomic_store = Arc::new(AtomicStore::new());
 
-        let bucket = RateLimiter::direct(Quota::per_second(
-            NonZeroU32::new(self.config.rate_per_gen()).expect("QPS is non-zero"),
-        ));
-
+        let bucket = self.config.rate_limiter();
         let mut sender = UdpSender {
             config: self.config.clone(),
             s,
-            store: store.clone(),
-            atomic_store,
+            store: Arc::clone(&store),
+            atomic_store: Arc::clone(&atomic_store),
             bucket,
         };
         let sender_handle = tokio::spawn(async move {
@@ -99,7 +95,7 @@ impl Generator {
                 error!(?err, "Error in UDP send task");
             }
         });
-        let cleanup_handle = self.cleanup_task(store.clone());
+        let cleanup_handle = self.cleanup_task(Arc::clone(&store), Arc::clone(&atomic_store));
 
         let mut recv = UdpFramed::new(r, BytesCodec::new());
         let sleep = time::sleep(Duration::from_secs(1));
@@ -121,7 +117,7 @@ impl Generator {
                         let mut store = store.lock();
                         store.ids.push_back(id);
                         if let Some(qinfo) = store.in_flight.remove(&id) {
-                            stats.update(qinfo.sent);
+                            stats.update_latencies(qinfo.sent);
                         }
                         drop(store);
                     }
@@ -154,7 +150,11 @@ impl Generator {
 
         Ok(())
     }
-    fn cleanup_task(&self, store: Arc<Mutex<Store>>) -> JoinHandle<()> {
+    fn cleanup_task(
+        &self,
+        store: Arc<Mutex<Store>>,
+        atomic_store: Arc<AtomicStore>,
+    ) -> JoinHandle<()> {
         let timeout = self.config.timeout;
         tokio::spawn(async move {
             let mut sleep = time::interval(timeout);
@@ -164,6 +164,7 @@ impl Generator {
                 let mut store = store.lock();
                 let now = StdInstant::now();
                 let mut ids = Vec::new();
+                // remove all timed out ids from in_flight
                 store.in_flight.retain(|id, info| {
                     if now - info.sent >= timeout {
                         ids.push(*id);
@@ -173,90 +174,14 @@ impl Generator {
                     }
                 });
                 trace!("timing out {} ids", ids.len());
+                atomic_store
+                    .timed_out
+                    .fetch_add(ids.len() as u64, atomic::Ordering::Relaxed);
+                // add back the ids so they can be used
                 store.ids.extend(ids);
                 drop(store);
             }
         })
-    }
-}
-
-#[derive(Debug)]
-struct StatsTracker {
-    recv: u128,
-    latency: Duration,
-    min_latency: Duration,
-    max_latency: Duration,
-    total_timeouts: u128,
-}
-
-impl Default for StatsTracker {
-    fn default() -> Self {
-        Self {
-            recv: 0,
-            total_timeouts: 0,
-            latency: Duration::from_micros(0),
-            min_latency: Duration::from_micros(0),
-            max_latency: Duration::from_micros(0),
-        }
-    }
-}
-impl StatsTracker {
-    fn reset(&mut self) {
-        *self = StatsTracker {
-            recv: 0,
-            total_timeouts: 0,
-            latency: Duration::from_micros(0),
-            min_latency: Duration::from_micros(u64::max_value()),
-            max_latency: Duration::from_micros(0),
-        };
-    }
-
-    fn avg_latency(&self) -> Cow<'static, str> {
-        if self.recv != 0 {
-            Cow::Owned(((self.latency.as_micros() / self.recv) as f32 / 1_000.).to_string())
-        } else {
-            Cow::Borrowed("-")
-        }
-    }
-
-    fn update(&mut self, sent: StdInstant) {
-        if let Some(latency) = StdInstant::now().checked_duration_since(sent) {
-            self.latency += latency;
-            self.min_latency = self.min_latency.min(latency);
-            self.max_latency = self.max_latency.max(latency);
-        }
-    }
-
-    fn min_latency(&self) -> f32 {
-        if self.min_latency.as_micros() == u64::max_value() as u128 {
-            0.
-        } else {
-            self.min_latency.as_micros() as f32 / 1_000.
-        }
-    }
-
-    fn max_latency(&self) -> f32 {
-        self.max_latency.as_micros() as f32 / 1_000.
-    }
-
-    fn stats_string(
-        &self,
-        elapsed: Duration,
-        total_duration: Duration,
-        in_flight: usize,
-        ids: usize,
-    ) -> String {
-        format!(
-            "elapsed: {}s recv: {} min/avg/max: {}ms/{}ms/{}ms duration: {}s in_flight: {} ids: {}",
-            &elapsed.as_secs_f32().to_string()[0..4],
-            self.recv,
-            self.min_latency(),
-            self.avg_latency(),
-            self.max_latency(),
-            &total_duration.as_secs_f32().to_string()[0..4],
-            in_flight,
-            ids
-        )
     }
 }
 
