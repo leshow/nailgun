@@ -12,7 +12,6 @@ use std::convert::TryFrom;
 
 use anyhow::{anyhow, Result};
 use clap::Clap;
-use gen::Config;
 use tokio::{
     runtime::Builder,
     signal,
@@ -21,13 +20,14 @@ use tokio::{
 use tracing::{error, info, trace};
 
 mod args;
+mod config;
 mod gen;
 mod msg;
 mod query;
 mod sender;
 mod shutdown;
 
-use crate::{args::Args, gen::Generator, shutdown::Shutdown};
+use crate::{args::Args, config::Config, gen::Generator, shutdown::Shutdown};
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -110,7 +110,6 @@ impl Runner {
         let mut handles = Vec::with_capacity(len);
 
         for i in 0..len {
-            trace!("spawning generator {}", i);
             let mut gen = Generator {
                 config: Config::try_from(&self.args)?,
                 // Receive shutdown notifications.
@@ -119,6 +118,7 @@ impl Runner {
                 // dropped.
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
             };
+            trace!("spawning generator {} with QPS {}", i, gen.config.qps);
             let handle = tokio::spawn(async move {
                 if let Err(err) = gen.run().await {
                     error!(?err, "generator exited with error");

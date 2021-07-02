@@ -4,9 +4,8 @@ use std::{
     convert::TryFrom,
     net::{IpAddr, SocketAddr},
     num::NonZeroU32,
-    path::PathBuf,
     sync::{atomic::AtomicUsize, Arc},
-    time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant as StdInstant},
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -17,20 +16,15 @@ use rustc_hash::FxHashMap;
 use tokio::{
     net::UdpSocket,
     sync::mpsc,
-    task::{self, JoinHandle},
+    task::JoinHandle,
     time::{self, Instant},
 };
 use tokio_stream::StreamExt;
 use tokio_util::{codec::BytesCodec, udp::UdpFramed};
 use tracing::{error, info, trace};
-use trust_dns_proto::rr::{Name, RecordType};
+use trust_dns_proto::rr::Name;
 
-use crate::{
-    args::{Args, Protocol},
-    msg::BufMsg,
-    sender::UdpSender,
-    shutdown::Shutdown,
-};
+use crate::{args::Args, config::Config, msg::BufMsg, sender::UdpSender, shutdown::Shutdown};
 use tokenbucket::Builder;
 
 #[derive(Debug)]
@@ -38,39 +32,6 @@ pub struct Generator {
     pub config: Config,
     pub shutdown: Shutdown,
     pub _shutdown_complete: mpsc::Sender<()>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub protocol: Protocol,
-    pub addr: SocketAddr,
-    pub record: Name,
-    pub qtype: RecordType,
-    pub qps: u32,
-    pub delay_ms: Duration,
-    pub timeout: Duration,
-    pub file: Option<PathBuf>,
-    pub generators: usize,
-}
-
-impl Config {
-    pub fn generator_capacity(&self) -> usize {
-        if self.qps == 0 {
-            0
-        } else {
-            self.qps as usize / self.generators
-        }
-    }
-    pub fn rate(&self) -> usize {
-        self.generator_capacity() / 10
-    }
-    pub fn batch_size(&self) -> u32 {
-        if self.qps == 0 {
-            1_000 // default batch size
-        } else {
-            self.qps
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -123,19 +84,23 @@ impl Generator {
         let store = Arc::new(Mutex::new(Store::new()));
         let atomic_store = Arc::new(AtomicStore::new());
         // start token bucket
-        trace!(
-            "building token bucket with capacity {} refilling {} every 100ms",
-            self.config.generator_capacity(),
-            self.config.rate()
-        );
-        let mut bucket = Builder::new()
-            .initial(0)
-            .capacity(self.config.generator_capacity() as usize)
-            .rate(self.config.rate() as usize)
-            .interval_millis(100)
-            .build_async();
-        let runner = bucket.runner();
-        let token_handle = tokio::spawn(async move { runner.run().await });
+        // trace!(
+        //     "building token bucket with capacity {} refilling {} every 1ms",
+        //     self.config.generator_capacity(),
+        //     self.config.rate()
+        // );
+        // let mut bucket = Builder::new()
+        //     .initial(0)
+        //     .capacity(self.config.generator_capacity() as usize)
+        //     .rate(self.config.rate() as usize)
+        //     .interval_millis(1)
+        //     .build_async();
+        // let runner = bucket.runner();
+        // let token_handle = tokio::spawn(async move { runner.run().await });
+
+        let bucket = RateLimiter::direct(Quota::per_second(
+            NonZeroU32::new(self.config.qps).expect("QPS is non-zero"),
+        ));
 
         let mut sender = UdpSender {
             config: self.config.clone(),
@@ -191,18 +156,7 @@ impl Generator {
                         let in_flight = store.in_flight.len();
                         let ids = store.ids.len();
                         drop(store);
-                    info!(
-                        "elapsed: {}s recv: {} avg_latency: {}ms min_latency: {}ms max_latency: {}ms total_duration: {}s in_flight: {} ids: {}",
-                        &elapsed.as_secs_f32().to_string()[0..4],
-                        stats.recv,
-                        stats.avg_latency(),
-                        stats.min_latency.as_millis(),
-                        stats.max_latency.as_millis(),
-                        &total_duration.as_secs_f32().to_string()[0..4],
-                        in_flight,
-                        ids
-
-                    );
+                    info!("{}", stats.stats_string(elapsed, total_duration, in_flight, ids));
                     stats.reset();
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
@@ -211,7 +165,7 @@ impl Generator {
                     // kill sender task
                     trace!("shutdown received");
                     sender_handle.abort();
-                    token_handle.abort();
+                    // token_handle.abort();
                     cleanup_handle.abort();
                     return Ok(());
                 }
@@ -268,17 +222,50 @@ impl StatsTracker {
 
     fn avg_latency(&self) -> Cow<'static, str> {
         if self.recv != 0 {
-            Cow::Owned((self.latency.as_millis() / self.recv).to_string())
+            Cow::Owned(((self.latency.as_micros() / self.recv) as f32 / 1_000.).to_string())
         } else {
             Cow::Borrowed("-")
         }
     }
 
     fn update(&mut self, sent: StdInstant) {
-        let latency = StdInstant::now().duration_since(sent);
-        self.latency += latency;
-        self.min_latency = self.min_latency.min(latency);
-        self.max_latency = self.max_latency.max(latency);
+        if let Some(latency) = StdInstant::now().checked_duration_since(sent) {
+            self.latency += latency;
+            self.min_latency = self.min_latency.min(latency);
+            self.max_latency = self.max_latency.max(latency);
+        }
+    }
+
+    fn min_latency(&self) -> f32 {
+        if self.min_latency.as_millis() == u64::max_value() as u128 {
+            0.
+        } else {
+            self.min_latency.as_micros() as f32 / 1_000.
+        }
+    }
+
+    fn max_latency(&self) -> f32 {
+        self.max_latency.as_micros() as f32 / 1_000.
+    }
+
+    fn stats_string(
+        &self,
+        elapsed: Duration,
+        total_duration: Duration,
+        in_flight: usize,
+        ids: usize,
+    ) -> String {
+        format!(
+            "elapsed: {}s recv: {} min/avg/max: {}ms/{}ms/{}ms duration: {}s in_flight: {} ids: {}",
+            &elapsed.as_secs_f32().to_string()[0..4],
+            self.recv,
+            self.min_latency(),
+            self.avg_latency(),
+            self.max_latency(),
+            &total_duration.as_secs_f32().to_string()[0..4],
+            in_flight,
+            ids
+        )
     }
 }
 
