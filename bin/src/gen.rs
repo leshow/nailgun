@@ -14,18 +14,25 @@ use parking_lot::Mutex;
 use rand::{seq::SliceRandom, thread_rng};
 use rustc_hash::FxHashMap;
 use tokio::{
-    net::UdpSocket,
+    net::{TcpStream, UdpSocket},
     sync::mpsc,
     task::JoinHandle,
     time::{self, Instant},
 };
 use tokio_stream::StreamExt;
-use tokio_util::{codec::BytesCodec, udp::UdpFramed};
+use tokio_util::{
+    codec::{BytesCodec, FramedRead},
+    udp::UdpFramed,
+};
 use tracing::{error, info, trace};
 use trust_dns_proto::rr::Name;
 
 use crate::{
-    args::Args, config::Config, msg::BufMsg, sender::UdpSender, shutdown::Shutdown,
+    args::Args,
+    config::Config,
+    msg::{BufMsg, BufMsgDecoder},
+    sender::{TcpSender, UdpSender},
+    shutdown::Shutdown,
     stats::StatsTracker,
 };
 
@@ -71,6 +78,88 @@ impl AtomicStore {
 }
 
 impl Generator {
+    // TODO: refactor common elements from run_* methods
+    pub async fn run_tcp(&mut self) -> Result<()> {
+        // stores
+        let store = Arc::new(Mutex::new(Store::new()));
+        let atomic_store = Arc::new(AtomicStore::new());
+        // token bucket
+        let bucket = self.config.rate_limiter();
+
+        // tcp
+        let (r, s) = TcpStream::connect(self.config.addr).await?.into_split();
+        let mut reader = FramedRead::new(
+            r,
+            BufMsgDecoder {
+                addr: self.config.addr,
+            },
+        );
+        let mut sender = TcpSender {
+            config: self.config.clone(),
+            s,
+            store: Arc::clone(&store),
+            atomic_store: Arc::clone(&atomic_store),
+            bucket,
+        };
+        let sender_handle = tokio::spawn(async move {
+            if let Err(err) = sender.run().await {
+                error!(?err, "Error in UDP send task");
+            }
+        });
+        // cleanup
+        let cleanup_handle = self.cleanup_task(Arc::clone(&store), Arc::clone(&atomic_store));
+        // stats/timers
+        let sleep = time::sleep(Duration::from_secs(1));
+        let mut interval = Instant::now();
+        let mut total_duration = Duration::from_millis(0);
+        tokio::pin!(sleep);
+        let mut stats = StatsTracker::default();
+
+        while !self.shutdown.is_shutdown() {
+            tokio::select! {
+                res = reader.next()  => {
+                    let frame = match res {
+                        Some(frame) => frame,
+                        None => return Ok(())
+                    };
+                    if let Ok(bufmsg) = frame {
+                        let id = bufmsg.msg_id();
+                        let mut store = store.lock();
+                        store.ids.push_back(id);
+                        if let Some(qinfo) = store.in_flight.remove(&id) {
+                            stats.update_latencies(qinfo.sent);
+                        }
+                        drop(store);
+                    }
+                    stats.recv += 1;
+                },
+                () = &mut sleep => {
+                    let now = Instant::now();
+                    let elapsed = now.duration_since(interval);
+                    total_duration += elapsed;
+                    interval = now;
+                        let store = store.lock();
+                        let in_flight = store.in_flight.len();
+                        let ids = store.ids.len();
+                        drop(store);
+                    info!("{}", stats.stats_string(elapsed, total_duration, in_flight, ids));
+                    stats.reset();
+                    // reset the timer
+                    sleep.as_mut().reset(now + Duration::from_secs(1));
+                },
+                _ = self.shutdown.recv() => {
+                    // kill sender task
+                    trace!("shutdown received");
+                    sender_handle.abort();
+                    // token_handle.abort();
+                    cleanup_handle.abort();
+                    return Ok(());
+                }
+            }
+        }
+
+        Ok(())
+    }
     pub async fn run(&mut self) -> Result<()> {
         // choose src based on addr
         let src: SocketAddr = match self.config.addr {
@@ -83,6 +172,8 @@ impl Generator {
         let atomic_store = Arc::new(AtomicStore::new());
 
         let bucket = self.config.rate_limiter();
+        // udp
+        let mut recv = UdpFramed::new(r, BytesCodec::new());
         let mut sender = UdpSender {
             config: self.config.clone(),
             s,
@@ -95,9 +186,10 @@ impl Generator {
                 error!(?err, "Error in UDP send task");
             }
         });
+        // cleanup
         let cleanup_handle = self.cleanup_task(Arc::clone(&store), Arc::clone(&atomic_store));
 
-        let mut recv = UdpFramed::new(r, BytesCodec::new());
+        // stats/timers
         let sleep = time::sleep(Duration::from_secs(1));
         let mut interval = Instant::now();
         let mut total_duration = Duration::from_millis(0);
