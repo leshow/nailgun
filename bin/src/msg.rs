@@ -1,8 +1,7 @@
-use std::{io, net::SocketAddr};
+use std::net::SocketAddr;
 
 use bytes::Bytes;
 use bytes::{Buf, BytesMut};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::codec::Decoder;
 
 pub struct BufMsg {
@@ -73,12 +72,12 @@ impl From<(Bytes, SocketAddr)> for BufMsg {
     }
 }
 
-pub struct BufMsgDecoder {
+pub struct TcpBufMsgDecoder {
     pub addr: SocketAddr,
 }
 
-impl Decoder for BufMsgDecoder {
-    type Item = BufMsg;
+impl Decoder for TcpBufMsgDecoder {
+    type Item = (BytesMut, SocketAddr);
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -89,7 +88,7 @@ impl Decoder for BufMsgDecoder {
 
         let mut len_buf = [0u8; 2];
         len_buf.copy_from_slice(&src[..2]);
-        let length = u16::from_le_bytes(len_buf) as usize;
+        let length = u16::from_be_bytes(len_buf) as usize;
 
         if src.len() < 2 + length {
             // buffer doesn't have all the data yet, so reserve
@@ -103,7 +102,7 @@ impl Decoder for BufMsgDecoder {
         // src.advance(2 + length);
         // Ok(Some(BufMsg::new(buf.into(), self.addr)))
         src.advance(2); // advance over len
-        let buf = src.split_to(length).freeze();
-        Ok(Some(BufMsg::new(buf, self.addr)))
+        let buf = src.split_to(length);
+        Ok(Some((buf, self.addr)))
     }
 }

@@ -1,11 +1,15 @@
 use std::{
     borrow::Cow,
+    sync::{atomic, Arc},
     time::{Duration, Instant},
 };
+
+use crate::gen::AtomicStore;
 
 #[derive(Debug)]
 pub struct StatsTracker {
     pub recv: u128,
+    pub atomic_store: Arc<AtomicStore>,
     latency: Duration,
     min_latency: Duration,
     max_latency: Duration,
@@ -15,11 +19,10 @@ pub struct StatsTracker {
 impl Default for StatsTracker {
     fn default() -> Self {
         Self {
-            recv: 0,
-            total_timeouts: 0,
             latency: Duration::from_micros(0),
             min_latency: Duration::from_micros(0),
             max_latency: Duration::from_micros(0),
+            ..Self::default()
         }
     }
 }
@@ -67,8 +70,9 @@ impl StatsTracker {
         ids: usize,
     ) -> String {
         format!(
-            "elapsed: {}s recv: {} min/avg/max: {}ms/{}ms/{}ms duration: {}s in_flight: {} ids: {}",
+            "elapsed: {}s sent: {} recv: {} min/avg/max: {}ms/{}ms/{}ms duration: {}s in_flight: {} ids: {}",
             &elapsed.as_secs_f32().to_string()[0..4],
+            self.atomic_store.sent.load(atomic::Ordering::Relaxed),
             self.recv,
             self.min_latency(),
             self.avg_latency(),
