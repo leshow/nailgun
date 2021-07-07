@@ -33,7 +33,7 @@ use tokio_util::{
     codec::{BytesCodec, FramedRead},
     udp::UdpFramed,
 };
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 use trust_dns_proto::rr::Name;
 
 use crate::{
@@ -42,7 +42,7 @@ use crate::{
     msg::{BufMsg, TcpDecoder},
     sender::{MsgSend, Sender},
     shutdown::Shutdown,
-    stats::StatsTracker,
+    stats::{StatsInterval, StatsTracker},
 };
 
 #[derive(Debug)]
@@ -85,12 +85,14 @@ impl AtomicStore {
 }
 
 impl Generator {
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<StatsInterval> {
         let store = Arc::new(Mutex::new(Store::new()));
         let mut stats = StatsTracker::default();
 
         let bucket = self.config.rate_limiter();
         let (mut reader, mut sender) = match self.config.protocol {
+            // TODO: perhaps we shouldn't do this abstraction because we should be opening
+            // more TcpStreams instead of one per generator
             Protocol::Tcp => {
                 TcpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
             }
@@ -100,13 +102,13 @@ impl Generator {
         };
         let sender_handle = tokio::spawn(async move {
             if let Err(err) = sender.run().await {
-                error!(?err, "Error in UDP send task");
+                error!(?err, "Error in send task");
             }
         });
         // cleanup
         let cleanup_handle = self.cleanup_task(Arc::clone(&store), Arc::clone(&stats.atomic_store));
 
-        // stats/timers
+        // timers
         let sleep = time::sleep(Duration::from_secs(1));
         let mut interval = Instant::now();
         let mut total_duration = Duration::from_millis(0);
@@ -117,7 +119,7 @@ impl Generator {
                 res = reader.next() => {
                     let frame = match res {
                         Some(frame) => frame,
-                        None => return Ok(())
+                        None => return Ok(stats.totals())
                     };
                     if let Ok((buf, addr)) = frame {
                         let msg = BufMsg::new(buf.freeze(), addr);
@@ -125,7 +127,7 @@ impl Generator {
                         let mut store = store.lock();
                         store.ids.push_back(id);
                         if let Some(qinfo) = store.in_flight.remove(&id) {
-                            stats.update(qinfo.sent, msg.rcode());
+                            stats.update(qinfo.sent, &msg);
                         }
                         drop(store);
                     }
@@ -141,7 +143,6 @@ impl Generator {
                     let ids = store.ids.len();
                     drop(store);
                     stats.log_stats(elapsed, total_duration, in_flight, ids);
-                    stats.reset();
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
@@ -150,12 +151,12 @@ impl Generator {
                     trace!("shutdown received");
                     sender_handle.abort();
                     cleanup_handle.abort();
-                    return Ok(());
+                    return Ok(stats.totals());
                 }
             }
         }
 
-        Ok(())
+        Ok(stats.totals())
     }
     fn cleanup_task(
         &self,
@@ -250,6 +251,7 @@ impl BuildGen for TcpGen {
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building TCP generator");
+        // TODO: shutdown ?
         let (r, s) = TcpStream::connect(config.addr).await?.into_split();
         let reader = FramedRead::new(r, TcpDecoder { addr: config.addr });
         let sender = Sender {
@@ -279,7 +281,6 @@ impl BuildGen for UdpGen {
         let r = Arc::new(UdpSocket::bind(src).await?);
         let s = Arc::clone(&r);
 
-        // udp
         let recv = UdpFramed::new(r, BytesCodec::new());
         let sender = Sender {
             config: config.clone(),

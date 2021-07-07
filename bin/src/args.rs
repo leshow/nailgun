@@ -38,7 +38,7 @@ pub struct Args {
     /// number of tokio worker threads to spawn
     #[clap(long, short = 'w', default_value = "1")]
     pub wcount: usize,
-    #[clap(long, short = 'l', default_value = "none")]
+    #[clap(long, short = 'l', default_value = "pretty")]
     pub logs: LogStructure,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
     /// file generator.
@@ -48,7 +48,8 @@ pub struct Args {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum LogStructure {
-    None,
+    Debug,
+    Pretty,
     Json,
 }
 
@@ -58,7 +59,8 @@ impl FromStr for LogStructure {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.to_ascii_lowercase()[..] {
             "json" => Ok(LogStructure::Json),
-            "none" => Ok(LogStructure::None),
+            "pretty" => Ok(LogStructure::Pretty),
+            "debug" => Ok(LogStructure::Debug),
             _ => Err(anyhow!(
                 "unknown log structure type: {:?} must be \"json\" or \"compact\" or \"pretty\"",
                 s

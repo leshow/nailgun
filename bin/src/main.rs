@@ -19,7 +19,10 @@ use tokio::{
 };
 use tracing::{error, info, trace};
 use tracing_subscriber::{
-    fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
+    fmt::{self, format::Pretty, FormatFields},
+    prelude::__tracing_subscriber_SubscriberExt,
+    util::SubscriberInitExt,
+    EnvFilter,
 };
 
 mod args;
@@ -38,12 +41,37 @@ use crate::{
     shutdown::Shutdown,
 };
 
+struct Output;
+
+impl<'writer> FormatFields<'writer> for Output {
+    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
+        &self,
+        writer: &'writer mut dyn std::fmt::Write,
+        fields: R,
+    ) -> std::fmt::Result {
+        todo!()
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     // tracing_subscriber::fmt::init();
 
     match args.logs {
-        LogStructure::None => {
+        LogStructure::Pretty => {
+            let fmt_layer = fmt::layer()
+                .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                .with_target(false);
+            let filter_layer = EnvFilter::try_from_default_env()
+                .or_else(|_| EnvFilter::try_new("info"))
+                .unwrap();
+
+            tracing_subscriber::registry()
+                .with(filter_layer)
+                .with(fmt_layer)
+                .init();
+        }
+        LogStructure::Debug => {
             let fmt_layer = fmt::layer();
             let filter_layer = EnvFilter::try_from_default_env()
                 .or_else(|_| EnvFilter::try_new("info"))
@@ -91,11 +119,14 @@ fn main() -> Result<()> {
         tokio::select! {
             res = runner.run() => {
                 if let Err(err) = res {
-                    error!(?err, "nailgun exited with failure");
+                    error!(?err, "nailgun exited with an error");
                 }
             },
             res = sig() => {
-                info!(?res, "caught signal handler-- exiting")
+                info!("caught signal handler-- exiting");
+                if let Err(err) = res {
+                    error!(?err);
+                }
             }
         }
         // Extract the `shutdown_complete` receiver and transmitter
