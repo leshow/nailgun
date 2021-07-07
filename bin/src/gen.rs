@@ -39,7 +39,7 @@ use trust_dns_proto::rr::Name;
 use crate::{
     args::{Args, Protocol},
     config::Config,
-    msg::{BufMsg, TcpBufMsgDecoder},
+    msg::{BufMsg, TcpDecoder},
     sender::{MsgSend, Sender},
     shutdown::Shutdown,
     stats::StatsTracker,
@@ -118,7 +118,7 @@ impl Generator {
                         let mut store = store.lock();
                         store.ids.push_back(id);
                         if let Some(qinfo) = store.in_flight.remove(&id) {
-                            stats.update_latencies(qinfo.sent);
+                            stats.update(qinfo.sent, msg.rcode());
                         }
                         drop(store);
                     }
@@ -129,20 +129,19 @@ impl Generator {
                     let elapsed = now.duration_since(interval);
                     total_duration += elapsed;
                     interval = now;
-                        let store = store.lock();
-                        let in_flight = store.in_flight.len();
-                        let ids = store.ids.len();
-                        drop(store);
+                    let store = store.lock();
+                    let in_flight = store.in_flight.len();
+                    let ids = store.ids.len();
+                    drop(store);
                     info!("{}", stats.stats_string(elapsed, total_duration, in_flight, ids));
                     stats.reset();
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
                 _ = self.shutdown.recv() => {
-                    // kill sender task
+                    // kill child tasks
                     trace!("shutdown received");
                     sender_handle.abort();
-                    // token_handle.abort();
                     cleanup_handle.abort();
                     return Ok(());
                 }
@@ -234,6 +233,8 @@ trait BuildGen {
     )>;
 }
 
+type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+
 #[async_trait]
 impl BuildGen for TcpGen {
     async fn build(
@@ -241,13 +242,10 @@ impl BuildGen for TcpGen {
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(
-        Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
-        Sender,
-    )> {
+    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building TCP generator");
         let (r, s) = TcpStream::connect(config.addr).await?.into_split();
-        let reader = FramedRead::new(r, TcpBufMsgDecoder { addr: config.addr });
+        let reader = FramedRead::new(r, TcpDecoder { addr: config.addr });
         let sender = Sender {
             config: config.clone(),
             s: MsgSend::Tcp { s },
@@ -266,10 +264,7 @@ impl BuildGen for UdpGen {
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(
-        Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
-        Sender,
-    )> {
+    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
         let src: SocketAddr = match config.addr {
             SocketAddr::V4(_) => ([0, 0, 0, 0], 0).into(),

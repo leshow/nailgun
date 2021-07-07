@@ -28,13 +28,22 @@ mod sender;
 mod shutdown;
 mod stats;
 
-use crate::{args::Args, config::Config, gen::Generator, shutdown::Shutdown};
+use crate::{
+    args::{Args, LogStructure},
+    config::Config,
+    gen::Generator,
+    shutdown::Shutdown,
+};
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
     let args = Args::parse();
-    trace!("{:?}", args);
+    match args.logs {
+        LogStructure::None => tracing_subscriber::fmt().init(),
+        LogStructure::Json => tracing_subscriber::fmt().json().init(),
+        LogStructure::Compact => tracing_subscriber::fmt().compact().init(),
+    }
 
+    trace!("{:?}", args);
     let rt = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(args.wcount)

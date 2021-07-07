@@ -1,6 +1,5 @@
 use std::{
     net::SocketAddr,
-    num::NonZeroU32,
     sync::{atomic, Arc},
     time::Instant,
 };
@@ -49,7 +48,7 @@ impl Sender {
             };
             for next_id in ids {
                 if let Some(bucket) = &self.bucket {
-                    bucket.until_n_ready(NonZeroU32::new(1).unwrap()).await?;
+                    bucket.until_ready().await;
                 }
                 // TODO: better way to do this that locks less?
                 {
@@ -72,6 +71,7 @@ impl Sender {
     }
 }
 
+// a very simple DNS message sender
 #[derive(Debug)]
 pub enum MsgSend {
     Tcp { s: OwnedWriteHalf },

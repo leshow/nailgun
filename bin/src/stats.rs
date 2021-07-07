@@ -4,6 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use trust_dns_proto::op::ResponseCode;
+
 use crate::gen::AtomicStore;
 
 #[derive(Debug)]
@@ -42,7 +44,7 @@ impl StatsTracker {
         }
     }
 
-    pub fn update_latencies(&mut self, sent: Instant) {
+    pub fn update(&mut self, sent: Instant, rcode: u8) {
         if let Some(latency) = Instant::now().checked_duration_since(sent) {
             self.latency += latency;
             self.min_latency = self.min_latency.min(latency);

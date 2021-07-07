@@ -38,10 +38,35 @@ pub struct Args {
     /// number of tokio worker threads to spawn
     #[clap(long, short = 'w', default_value = "1")]
     pub wcount: usize,
+    #[clap(long, short = 'l', default_value = "none")]
+    pub logs: LogStructure,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
     /// file generator.
     #[clap(long, short = 'f')]
     pub file: Option<PathBuf>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum LogStructure {
+    None,
+    Json,
+    Compact,
+}
+
+impl FromStr for LogStructure {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match &s.to_ascii_lowercase()[..] {
+            "json" => Ok(LogStructure::Json),
+            "compact" => Ok(LogStructure::Compact),
+            "none" => Ok(LogStructure::None),
+            _ => Err(anyhow!(
+                "unknown log structure type: {:?} must be \"json\" or \"compact\" or \"pretty\"",
+                s
+            )),
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
