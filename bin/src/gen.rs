@@ -77,6 +77,13 @@ pub struct AtomicStore {
     pub timed_out: AtomicU64,
 }
 
+impl AtomicStore {
+    pub fn reset(&self) {
+        self.sent.store(0, atomic::Ordering::Relaxed);
+        self.timed_out.store(0, atomic::Ordering::Relaxed);
+    }
+}
+
 impl Generator {
     pub async fn run(&mut self) -> Result<()> {
         let store = Arc::new(Mutex::new(Store::new()));
@@ -133,7 +140,7 @@ impl Generator {
                     let in_flight = store.in_flight.len();
                     let ids = store.ids.len();
                     drop(store);
-                    info!("{}", stats.stats_string(elapsed, total_duration, in_flight, ids));
+                    stats.log_stats(elapsed, total_duration, in_flight, ids);
                     stats.reset();
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
@@ -173,7 +180,6 @@ impl Generator {
                         true
                     }
                 });
-                trace!("timing out {} ids", ids.len());
                 atomic_store
                     .timed_out
                     .fetch_add(ids.len() as u64, atomic::Ordering::Relaxed);

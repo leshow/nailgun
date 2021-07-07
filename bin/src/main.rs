@@ -18,6 +18,9 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 use tracing::{error, info, trace};
+use tracing_subscriber::{
+    fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 
 mod args;
 mod config;
@@ -37,10 +40,31 @@ use crate::{
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    // tracing_subscriber::fmt::init();
+
     match args.logs {
-        LogStructure::None => tracing_subscriber::fmt().init(),
-        LogStructure::Json => tracing_subscriber::fmt().json().init(),
-        LogStructure::Compact => tracing_subscriber::fmt().compact().init(),
+        LogStructure::None => {
+            let fmt_layer = fmt::layer();
+            let filter_layer = EnvFilter::try_from_default_env()
+                .or_else(|_| EnvFilter::try_new("info"))
+                .unwrap();
+
+            tracing_subscriber::registry()
+                .with(filter_layer)
+                .with(fmt_layer)
+                .init();
+        }
+        LogStructure::Json => {
+            let fmt_layer = fmt::layer().json();
+            let filter_layer = EnvFilter::try_from_default_env()
+                .or_else(|_| EnvFilter::try_new("info"))
+                .unwrap();
+
+            tracing_subscriber::registry()
+                .with(filter_layer)
+                .with(fmt_layer)
+                .init();
+        }
     }
 
     trace!("{:?}", args);
@@ -48,7 +72,7 @@ fn main() -> Result<()> {
         .enable_all()
         .worker_threads(args.wcount)
         .build()?;
-    info!(?rt, "tokio runtime created");
+    trace!(?rt, "tokio runtime created");
 
     rt.block_on(async move {
         // When the provided `shutdown` future completes, we must send a shutdown

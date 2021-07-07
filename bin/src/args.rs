@@ -50,7 +50,6 @@ pub struct Args {
 pub enum LogStructure {
     None,
     Json,
-    Compact,
 }
 
 impl FromStr for LogStructure {
@@ -59,7 +58,6 @@ impl FromStr for LogStructure {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.to_ascii_lowercase()[..] {
             "json" => Ok(LogStructure::Json),
-            "compact" => Ok(LogStructure::Compact),
             "none" => Ok(LogStructure::None),
             _ => Err(anyhow!(
                 "unknown log structure type: {:?} must be \"json\" or \"compact\" or \"pretty\"",
