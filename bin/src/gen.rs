@@ -92,8 +92,9 @@ impl Generator {
 
         let bucket = self.config.rate_limiter();
         let (mut reader, mut sender) = match self.config.protocol {
-            // TODO: perhaps we shouldn't do this abstraction because we should be opening
-            // more TcpStreams instead of one per generator
+            // TODO: Probably not realistic that each generator maintains one TcpStream.
+            // Would need to drop this abstraction in order to have tcp gen open/close multiple
+            // connections
             Protocol::Tcp => {
                 TcpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
             }

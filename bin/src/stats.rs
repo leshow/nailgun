@@ -7,6 +7,7 @@ use std::{
 
 use rustc_hash::FxHashMap;
 use tracing::info;
+use trust_dns_proto::op::ResponseCode;
 
 use crate::{gen::AtomicStore, msg::BufMsg};
 
@@ -188,7 +189,15 @@ impl StatsInterval {
         if interval.avg_size != 0 {
             self.avg_size = (self.avg_size * (intervals - 1) + interval.avg_size) / intervals;
         }
-        self.rcodes.extend(interval.rcodes.into_iter());
+        for (rcode, count) in interval.rcodes.into_iter() {
+            *self.rcodes.entry(rcode).or_insert(0) += count;
+        }
+    }
+    fn rcodes_summary(&self) {
+        for (rcode, count) in self.rcodes.iter() {
+            let rcode = format!("{:?}", ResponseCode::from(0, *rcode));
+            info!(responses = %format!("{}: {}", rcode, *count));
+        }
     }
 
     pub fn summary(&self) {
@@ -202,6 +211,7 @@ impl StatsInterval {
             avg_size = %format!("{} bytes", self.avg_size),
             timeouts = %format!("{} ({}%)", self.timeouts, (self.timeouts  as f32/ self.recv as f32) * 100.)
         );
+        self.rcodes_summary();
     }
 }
 

@@ -216,8 +216,10 @@ impl Runner {
     }
 }
 
-// TODO: perhaps we want this to listen to generator
-// stats rather than just aggregating them after shutdown
+// TODO: do we want this to listen to all generators stats
+// and take care of logging? we could aggregate all the data for
+// each period this way. probably better than lettering each generator
+// log separately?
 
 #[derive(Debug)]
 struct StatsRunner {
