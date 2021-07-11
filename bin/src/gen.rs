@@ -49,6 +49,7 @@ use crate::{
 pub struct Generator {
     pub config: Config,
     pub shutdown: Shutdown,
+    pub stats_tx: mpsc::Sender<StatsInterval>,
     pub _shutdown_complete: mpsc::Sender<()>,
 }
 
@@ -85,7 +86,7 @@ impl AtomicStore {
 }
 
 impl Generator {
-    pub async fn run(&mut self) -> Result<StatsInterval> {
+    pub async fn run(&mut self) -> Result<()> {
         let store = Arc::new(Mutex::new(Store::new()));
         let mut stats = StatsTracker::default();
 
@@ -128,7 +129,7 @@ impl Generator {
                 res = reader.next() => {
                     let frame = match res {
                         Some(frame) => frame,
-                        None => return Ok(stats.totals())
+                        None => return Ok(())
                     };
                     if let Ok((buf, addr)) = frame {
                         let msg = BufMsg::new(buf.freeze(), addr);
@@ -162,12 +163,13 @@ impl Generator {
                     self.wait_in_flight(store).await;
                     // abort cleanup
                     cleanup_handle.abort();
-                    return Ok(stats.totals());
+                    self.stats_tx.send(stats.totals()).await?;
+                    return Ok(());
                 }
             }
         }
 
-        Ok(stats.totals())
+        Ok(())
     }
     async fn wait_in_flight(&self, store: Arc<Mutex<Store>>) {
         let mut interval = time::interval(Duration::from_millis(10));

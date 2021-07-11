@@ -181,7 +181,7 @@ impl Runner {
         let len = self.args.wcount * self.args.tcount;
         let mut handles = Vec::with_capacity(len);
 
-        let (tx, rx) = mpsc::channel(len);
+        let (stats_tx, rx) = mpsc::channel(len);
         let mut stats = StatsRunner { rx, len };
         tokio::spawn(async move { stats.run().await });
 
@@ -193,31 +193,24 @@ impl Runner {
                 // Notifies the receiver half once all clones are
                 // dropped.
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
+                // stats sender
+                stats_tx: stats_tx.clone(),
             };
             trace!(
                 "spawning generator {} with QPS {}",
                 i,
                 gen.config.rate_per_gen()
             );
-            let tx = tx.clone();
             let handle = tokio::spawn(async move {
-                match gen.run().await {
-                    Err(err) => {
-                        error!(?err, "generator exited with error");
-                        Err(err)
-                    }
-                    Ok(agg) => {
-                        // last chance to run on exit
-                        tx.send(agg).await?;
-                        Ok(())
-                    }
+                if let Err(err) = gen.run().await {
+                    error!(?err, "generator exited with error");
                 }
             });
             handles.push(handle);
         }
 
         for handle in handles {
-            handle.await??;
+            handle.await?;
         }
         Ok(())
     }
@@ -236,12 +229,11 @@ impl StatsRunner {
     pub async fn run(&mut self) -> Result<()> {
         let mut summary = StatsInterval::default();
         let mut n = 0;
-        while n < self.len {
+        // recv returns None when all senders are dropped-- exiting
+        while let Some(interval) = self.rx.recv().await {
             n += 1;
-            if let Some(interval) = self.rx.recv().await {
-                trace!("received stats");
-                summary.update_totals(interval, n);
-            }
+            trace!("received stats");
+            summary.update_totals(interval, n);
         }
         summary.summary();
         Ok(())
