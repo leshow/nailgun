@@ -38,8 +38,8 @@ pub struct Args {
     /// limits traffic generation to n seconds, 0 is unlimited
     #[clap(long, short = 'l', default_value = "0")]
     pub limit_secs: u64,
-    #[clap(long, short = 'l', default_value = "pretty")]
-    pub logs: LogStructure,
+    #[clap(long, default_value = "pretty")]
+    pub log: LogStructure,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
     /// file generator.
     #[clap(long, short = 'f')]
