@@ -110,10 +110,19 @@ impl Generator {
 
         // timers
         let sleep = time::sleep(Duration::from_secs(1));
+        tokio::pin!(sleep);
         let mut interval = Instant::now();
         let mut total_duration = Duration::from_millis(0);
-        tokio::pin!(sleep);
 
+        let log = |interval| {
+            let now = Instant::now();
+            let elapsed = now.duration_since(interval);
+            let store = store.lock();
+            let in_flight = store.in_flight.len();
+            let ids = store.ids.len();
+            drop(store);
+            (now, elapsed, in_flight, ids)
+        };
         while !self.shutdown.is_shutdown() {
             tokio::select! {
                 res = reader.next() => {
@@ -134,21 +143,19 @@ impl Generator {
                     stats.recv += 1;
                 },
                 () = &mut sleep => {
-                    let now = Instant::now();
-                    let elapsed = now.duration_since(interval);
+                    let (now, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
                     interval = now;
-                    let store = store.lock();
-                    let in_flight = store.in_flight.len();
-                    let ids = store.ids.len();
-                    drop(store);
                     stats.log_stats(elapsed, total_duration, in_flight, ids);
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
                 _ = self.shutdown.recv() => {
-                    // kill child tasks
                     trace!("shutdown received");
+                    let (_, elapsed, in_flight, ids) = log(interval);
+                    total_duration += elapsed;
+                    stats.log_stats(elapsed, total_duration, in_flight, ids);
+                    // kill child tasks
                     sender_handle.abort();
                     cleanup_handle.abort();
                     return Ok(stats.totals());
@@ -215,11 +222,8 @@ impl TryFrom<&Args> for Config {
             })?,
             qtype: args.qtype,
             qps: args.qps,
-            delay_ms: Duration::from_millis(args.delay_ms),
             timeout: Duration::from_secs(args.timeout),
             generators: args.tcount * args.wcount,
-            // TODO: in flamethrower batch is decided by protocol
-            file: args.file.clone(),
         })
     }
 }

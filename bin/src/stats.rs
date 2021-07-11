@@ -28,7 +28,7 @@ impl Default for StatsTracker {
     fn default() -> Self {
         Self {
             latency: Duration::from_micros(0),
-            min_latency: Duration::from_micros(0),
+            min_latency: Duration::from_micros(u64::MAX),
             max_latency: Duration::from_micros(0),
             recv: 0,
             ok_recv: 0,
@@ -42,11 +42,12 @@ impl Default for StatsTracker {
 }
 impl StatsTracker {
     pub fn reset(&mut self) {
-        self.min_latency = Duration::from_micros(u64::max_value());
+        self.min_latency = Duration::from_micros(u64::MAX);
         self.max_latency = Duration::from_micros(0);
         self.latency = Duration::from_micros(0);
         self.recv = 0;
         self.ok_recv = 0;
+        self.buf_size = 0;
         self.atomic_store.reset();
     }
 
@@ -97,8 +98,8 @@ impl StatsTracker {
         let sent = self.atomic_store.sent.load(atomic::Ordering::Relaxed);
         let recv = self.recv;
         let min = self.min_latency();
+        // TODO: no div by zero
         let avg = (self.latency.as_micros() / self.ok_recv as u128) as f32 / 1_000.;
-        let avg_latency = self.avg_latency(avg);
         let max = self.max_latency();
         let avg_size = self.buf_size / self.ok_recv as usize;
         let ok_recv = self.ok_recv;
@@ -124,7 +125,7 @@ impl StatsTracker {
             recv,
             to = timeouts,
             min = %format!("{}ms", min),
-            avg = %format!("{}ms", avg_latency),
+            avg = %format!("{}ms", self.avg_latency(avg)),
             max = %format!("{}ms", max),
             in_flight,
             ids
@@ -133,7 +134,7 @@ impl StatsTracker {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StatsInterval {
     duration: Duration,
     elapsed: Duration,
@@ -148,16 +149,38 @@ pub struct StatsInterval {
     avg_size: usize,
 }
 
+impl Default for StatsInterval {
+    fn default() -> Self {
+        Self {
+            duration: Duration::from_micros(0),
+            min_latency: f32::MAX,
+            avg_latency: 0.,
+            max_latency: 0.,
+            sent: 0,
+            recv: 0,
+            ok_recv: 0,
+            rcodes: FxHashMap::default(),
+            avg_size: 0,
+            elapsed: Duration::from_micros(0),
+            timeouts: 0,
+        }
+    }
+}
+
 impl StatsInterval {
-    fn update_totals(&mut self, interval: StatsInterval, intervals: usize) {
+    pub fn update_totals(&mut self, interval: StatsInterval, intervals: usize) {
         self.duration = interval.duration;
         self.elapsed += interval.elapsed;
         self.sent += interval.sent;
         self.recv += interval.recv;
         self.ok_recv += interval.ok_recv;
         self.timeouts += interval.timeouts;
-        self.min_latency = interval.min_latency.min(self.min_latency);
-        self.max_latency = interval.max_latency.min(self.max_latency);
+        self.min_latency = if interval.min_latency != 0. {
+            interval.min_latency.min(self.min_latency)
+        } else {
+            self.min_latency
+        };
+        self.max_latency = interval.max_latency.max(self.max_latency);
         if interval.avg_latency != 0. {
             self.avg_latency = (self.avg_latency * (intervals - 1) as f32 + interval.avg_latency)
                 / intervals as f32;
@@ -167,6 +190,7 @@ impl StatsInterval {
         }
         self.rcodes.extend(interval.rcodes.into_iter());
     }
+
     pub fn summary(&self) {
         info!(
             runtime = %PrettyDuration(self.duration),
@@ -176,11 +200,12 @@ impl StatsInterval {
             avg = %format!("{}ms", self.avg_latency),
             max = %format!("{}ms", self.max_latency),
             avg_size = %format!("{} bytes", self.avg_size),
-            timeouts = %format!("{} ({}%)", self.timeouts, self.timeouts / self.recv)
+            timeouts = %format!("{} ({}%)", self.timeouts, (self.timeouts  as f32/ self.recv as f32) * 100.)
         );
     }
 }
 
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct PrettyDuration(Duration);
 
 impl Display for PrettyDuration {

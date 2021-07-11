@@ -14,9 +14,6 @@ pub struct Args {
     /// which port to nail. Default is 53 for UDP/TCP
     #[clap(long, short = 'p', default_value = "53")]
     pub port: u16,
-    /// delay between each traffic generator's run in milliseconds
-    #[clap(long, short = 'd', default_value = "0")]
-    pub delay_ms: u64,
     /// the base record to use as the query for generators
     #[clap(long, short = 'r', default_value = "test.com.")]
     pub record: String,
@@ -38,6 +35,9 @@ pub struct Args {
     /// number of tokio worker threads to spawn
     #[clap(long, short = 'w', default_value = "1")]
     pub wcount: usize,
+    /// limits traffic generation to n seconds, 0 is unlimited
+    #[clap(long, short = 'l', default_value = "0")]
+    pub limit_secs: u64,
     #[clap(long, short = 'l', default_value = "pretty")]
     pub logs: LogStructure,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the

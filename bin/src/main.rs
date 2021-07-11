@@ -8,7 +8,7 @@
 #![deny(broken_intra_doc_links)]
 #![allow(clippy::cognitive_complexity)]
 
-use std::convert::TryFrom;
+use std::{convert::TryFrom, time::Duration};
 
 use anyhow::{anyhow, Result};
 use clap::Clap;
@@ -16,10 +16,11 @@ use tokio::{
     runtime::Builder,
     signal,
     sync::{broadcast, mpsc},
+    time,
 };
 use tracing::{error, info, trace};
 use tracing_subscriber::{
-    fmt::{self, format::Pretty, FormatFields},
+    fmt::{self, format::Pretty},
     prelude::__tracing_subscriber_SubscriberExt,
     util::SubscriberInitExt,
     EnvFilter,
@@ -39,19 +40,20 @@ use crate::{
     config::Config,
     gen::Generator,
     shutdown::Shutdown,
+    stats::StatsInterval,
 };
 
-struct Output;
-
-impl<'writer> FormatFields<'writer> for Output {
-    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
-        &self,
-        writer: &'writer mut dyn std::fmt::Write,
-        fields: R,
-    ) -> std::fmt::Result {
-        todo!()
-    }
-}
+// TODO: custom logging output format?
+// struct Output;
+// impl<'writer> FormatFields<'writer> for Output {
+//     fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
+//         &self,
+//         writer: &'writer mut dyn std::fmt::Write,
+//         fields: R,
+//     ) -> std::fmt::Result {
+//         todo!()
+//     }
+// }
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -110,6 +112,8 @@ fn main() -> Result<()> {
         // one.
         let (notify_shutdown, _) = broadcast::channel(1);
         let (shutdown_complete_tx, shutdown_complete_rx) = mpsc::channel(1);
+
+        let limit_secs = args.limit_secs;
         let mut runner = Runner {
             args,
             notify_shutdown,
@@ -127,6 +131,9 @@ fn main() -> Result<()> {
                 if let Err(err) = res {
                     error!(?err);
                 }
+            },
+            _ = time::sleep(Duration::from_secs(limit_secs)), if limit_secs != 0 => {
+                trace!("limit reached-- exiting");
             }
         }
         // Extract the `shutdown_complete` receiver and transmitter
@@ -174,6 +181,10 @@ impl Runner {
         let len = self.args.wcount * self.args.tcount;
         let mut handles = Vec::with_capacity(len);
 
+        let (tx, rx) = mpsc::channel(len);
+        let mut stats = StatsRunner { rx, len };
+        tokio::spawn(async move { stats.run().await });
+
         for i in 0..len {
             let mut gen = Generator {
                 config: Config::try_from(&self.args)?,
@@ -188,17 +199,51 @@ impl Runner {
                 i,
                 gen.config.rate_per_gen()
             );
+            let tx = tx.clone();
             let handle = tokio::spawn(async move {
-                if let Err(err) = gen.run().await {
-                    error!(?err, "generator exited with error");
+                match gen.run().await {
+                    Err(err) => {
+                        error!(?err, "generator exited with error");
+                        Err(err)
+                    }
+                    Ok(agg) => {
+                        // last chance to run on exit
+                        tx.send(agg).await?;
+                        Ok(())
+                    }
                 }
             });
             handles.push(handle);
         }
 
         for handle in handles {
-            handle.await?;
+            handle.await??;
         }
+        Ok(())
+    }
+}
+
+// TODO: perhaps we want this to listen to generator
+// stats rather than just aggregating them after shutdown
+
+#[derive(Debug)]
+struct StatsRunner {
+    rx: mpsc::Receiver<StatsInterval>,
+    len: usize,
+}
+
+impl StatsRunner {
+    pub async fn run(&mut self) -> Result<()> {
+        let mut summary = StatsInterval::default();
+        let mut n = 0;
+        while n < self.len {
+            n += 1;
+            if let Some(interval) = self.rx.recv().await {
+                trace!("received stats");
+                summary.update_totals(interval, n);
+            }
+        }
+        summary.summary();
         Ok(())
     }
 }

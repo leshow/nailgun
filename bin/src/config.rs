@@ -16,9 +16,7 @@ pub struct Config {
     pub record: Name,
     pub qtype: RecordType,
     pub qps: u32,
-    pub delay_ms: Duration,
     pub timeout: Duration,
-    pub file: Option<PathBuf>,
     pub generators: usize,
 }
 
