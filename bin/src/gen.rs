@@ -152,11 +152,15 @@ impl Generator {
                 },
                 _ = self.shutdown.recv() => {
                     trace!("shutdown received");
+                    // abort sender
+                    sender_handle.abort();
+                    // final log
                     let (_, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
                     stats.log_stats(elapsed, total_duration, in_flight, ids);
-                    // kill child tasks
-                    sender_handle.abort();
+                    // wait for remaining in flight messages or timeouts
+                    self.wait_in_flight(store).await;
+                    // abort cleanup
                     cleanup_handle.abort();
                     return Ok(stats.totals());
                 }
@@ -164,6 +168,21 @@ impl Generator {
         }
 
         Ok(stats.totals())
+    }
+    async fn wait_in_flight(&self, store: Arc<Mutex<Store>>) {
+        let mut interval = time::interval(Duration::from_millis(10));
+        let start_wait = StdInstant::now();
+        loop {
+            interval.tick().await;
+            let store = store.lock();
+            let empty = store.in_flight.is_empty();
+            drop(store);
+            let now = StdInstant::now();
+            if empty || (now - start_wait > self.config.timeout) {
+                trace!("waited {:?} for cleanup", now - start_wait);
+                return;
+            }
+        }
     }
     fn cleanup_task(
         &self,
