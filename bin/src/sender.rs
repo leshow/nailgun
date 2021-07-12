@@ -50,19 +50,21 @@ impl Sender {
                 if let Some(bucket) = &self.bucket {
                     bucket.until_ready().await;
                 }
+                let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype)
+                    .to_vec()?;
                 // TODO: better way to do this that locks less?
                 {
                     self.store.lock().in_flight.insert(
                         next_id,
                         QueryInfo {
                             sent: Instant::now(),
+                            len: msg.len(),
                         },
                     );
                 }
-                let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype);
                 // could be done with an async trait and Sender<S: MsgSender>
-                // but this just seems easier
-                self.s.send(&msg.to_vec()?[..]).await?;
+                // but this just seems easier for now
+                self.s.send(&msg[..]).await?;
                 self.atomic_store
                     .sent
                     .fetch_add(1, atomic::Ordering::Relaxed);

@@ -11,7 +11,10 @@ use rustc_hash::FxHashMap;
 use tracing::info;
 use trust_dns_proto::op::ResponseCode;
 
-use crate::{gen::AtomicStore, msg::BufMsg};
+use crate::{
+    gen::{AtomicStore, QueryInfo},
+    msg::BufMsg,
+};
 
 #[derive(Debug)]
 pub struct StatsTracker {
@@ -23,6 +26,7 @@ pub struct StatsTracker {
     min_latency: Duration,
     max_latency: Duration,
     rcodes: FxHashMap<u8, u64>,
+    recv_buf_size: usize,
     buf_size: usize,
     totals: StatsInterval,
 }
@@ -38,6 +42,7 @@ impl Default for StatsTracker {
             atomic_store: Arc::new(AtomicStore::default()),
             totals: StatsInterval::default(),
             rcodes: FxHashMap::default(),
+            recv_buf_size: 0,
             buf_size: 0,
             intervals: 0,
         }
@@ -51,6 +56,7 @@ impl StatsTracker {
         self.latency = Duration::from_micros(0);
         self.recv = 0;
         self.ok_recv = 0;
+        self.recv_buf_size = 0;
         self.buf_size = 0;
         self.atomic_store.reset();
     }
@@ -63,14 +69,15 @@ impl StatsTracker {
         }
     }
 
-    pub fn update(&mut self, sent: Instant, msg: &BufMsg) {
-        if let Some(latency) = Instant::now().checked_duration_since(sent) {
+    pub fn update(&mut self, qinfo: QueryInfo, msg: &BufMsg) {
+        if let Some(latency) = Instant::now().checked_duration_since(qinfo.sent) {
             self.latency += latency;
             self.min_latency = self.min_latency.min(latency);
             self.max_latency = self.max_latency.max(latency);
         }
         *self.rcodes.entry(msg.rcode()).or_insert(0) += 1;
-        self.buf_size += msg.bytes().len();
+        self.buf_size += qinfo.len;
+        self.recv_buf_size += msg.bytes().len();
         self.ok_recv += 1;
     }
 
@@ -102,19 +109,27 @@ impl StatsTracker {
         let sent = self.atomic_store.sent.load(atomic::Ordering::Relaxed);
         let recv = self.recv;
         let min = self.min_latency();
-        // TODO: no div by zero
+        // TODO: handle div by 0 better
         let avg = if self.ok_recv != 0 {
             (self.latency.as_micros() / self.ok_recv as u128) as f32 / 1_000.
         } else {
             // ?
             self.latency.as_micros() as f32 / 1_000.
         };
-        let max = self.max_latency();
-        let avg_size = if self.ok_recv != 0 {
-            self.buf_size / self.ok_recv as usize
+        let recv_avg_size = if self.ok_recv != 0 {
+            self.recv_buf_size / self.ok_recv as usize
+        } else {
+            self.recv_buf_size
+        };
+        // TODO: I think there is a potential bug here
+        // where we count sent via the atomic_store but
+        // buf_size is counted only on recv
+        let avg_size = if sent != 0 {
+            self.buf_size / sent as usize
         } else {
             self.buf_size
         };
+        let max = self.max_latency();
         let ok_recv = self.ok_recv;
         self.intervals += 1;
         let interval = StatsInterval {
@@ -127,6 +142,7 @@ impl StatsTracker {
             min_latency: min,
             avg_latency: avg,
             max_latency: max,
+            recv_avg_size,
             avg_size,
             rcodes: std::mem::take(&mut self.rcodes),
         };
@@ -140,6 +156,8 @@ impl StatsTracker {
             min = %format!("{}ms", min),
             avg = %format!("{}ms", self.avg_latency(avg)),
             max = %format!("{}ms", max),
+            avg_size,
+            recv_avg_size,
             in_flight,
             ids
         );
@@ -159,6 +177,7 @@ pub struct StatsInterval {
     avg_latency: f32,
     max_latency: f32,
     rcodes: FxHashMap<u8, u64>,
+    recv_avg_size: usize,
     avg_size: usize,
 }
 
@@ -174,6 +193,7 @@ impl Default for StatsInterval {
             ok_recv: 0,
             rcodes: FxHashMap::default(),
             avg_size: 0,
+            recv_avg_size: 0,
             elapsed: Duration::from_micros(0),
             timeouts: 0,
         }
@@ -208,6 +228,10 @@ impl StatsInterval {
         if interval.avg_size != 0 {
             self.avg_size = (self.avg_size * (intervals - 1) + interval.avg_size) / intervals;
         }
+        if interval.recv_avg_size != 0 {
+            self.recv_avg_size =
+                (self.recv_avg_size * (intervals - 1) + interval.recv_avg_size) / intervals;
+        }
         for (rcode, count) in interval.rcodes.into_iter() {
             *self.rcodes.entry(rcode).or_insert(0) += count;
         }
@@ -216,7 +240,11 @@ impl StatsInterval {
     pub fn summary(&self) -> Result<()> {
         use std::io::Write;
         let runtime = PrettyDuration(self.duration);
-        let to_percent = (self.timeouts as f32 / self.recv as f32) * 100.;
+        let to_percent = if self.recv == 0 {
+            100.
+        } else {
+            (self.timeouts as f32 / self.recv as f32) * 100.
+        };
         info!(
             runtime = %runtime,
             total_sent = self.sent,
@@ -224,7 +252,8 @@ impl StatsInterval {
             min = %format!("{}ms", self.min_latency),
             avg = %format!("{}ms", self.avg_latency),
             max = %format!("{}ms", self.max_latency),
-            avg_size = %format!("{} bytes", self.avg_size),
+            sent_avg_size = %format!("{} bytes", self.avg_size),
+            rcvd_avg_size = %format!("{} bytes", self.recv_avg_size),
             timeouts = %format!("{} ({}%)", self.timeouts, to_percent)
         );
         // TODO: print this better?
@@ -235,14 +264,15 @@ impl StatsInterval {
         let stdout = io::stdout();
         let mut f = stdout.lock();
         writeln!(f, "-----")?;
-        writeln!(f, "runtime      {}", runtime)?;
-        writeln!(f, "total sent   {}", self.sent)?;
-        writeln!(f, "total rcvd   {}", self.recv)?;
-        writeln!(f, "min latency  {}ms", self.min_latency)?;
-        writeln!(f, "avg latency  {}ms", self.avg_latency)?;
-        writeln!(f, "max latency  {}ms", self.max_latency)?;
-        writeln!(f, "avg size     {} bytes", self.avg_size)?;
-        writeln!(f, "timeouts     {} ({}%)", self.timeouts, to_percent)?;
+        writeln!(f, "runtime        {}", runtime)?;
+        writeln!(f, "total sent     {}", self.sent)?;
+        writeln!(f, "total rcvd     {}", self.recv)?;
+        writeln!(f, "min latency    {}ms", self.min_latency)?;
+        writeln!(f, "avg latency    {}ms", self.avg_latency)?;
+        writeln!(f, "max latency    {}ms", self.max_latency)?;
+        writeln!(f, "sent avg size  {} bytes", self.avg_size)?;
+        writeln!(f, "rcvd avg size  {} bytes", self.recv_avg_size)?;
+        writeln!(f, "timeouts       {} ({}%)", self.timeouts, to_percent)?;
         writeln!(f, "responses")?;
         for (rcode, count) in self.rcodes.iter() {
             writeln!(f, "   {:?} {}", ResponseCode::from(0, *rcode), *count)?;

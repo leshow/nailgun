@@ -56,6 +56,7 @@ pub struct Generator {
 #[derive(Debug)]
 pub struct QueryInfo {
     pub sent: StdInstant,
+    pub len: usize,
 }
 
 #[derive(Debug)]
@@ -137,7 +138,15 @@ impl Generator {
                         let mut store = store.lock();
                         store.ids.push_back(id);
                         if let Some(qinfo) = store.in_flight.remove(&id) {
-                            stats.update(qinfo.sent, &msg);
+                            // TODO: there is a bug here were if we
+                            // never recv nothing is removed, so there is no
+                            // sent buf_size
+                            //
+                            // two ideas to make this better & fix a few other things:
+                            // 1 - make a Arc<Mutex<Stats>> and share with all
+                            // generators
+                            // 2 - make a Stats actor and use mpsc chans.
+                            stats.update(qinfo, &msg);
                         }
                         drop(store);
                     }
