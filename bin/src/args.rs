@@ -39,7 +39,7 @@ pub struct Args {
     #[clap(long, short = 'l', default_value = "0")]
     pub limit_secs: u64,
     #[clap(long, default_value = "pretty")]
-    pub log: LogStructure,
+    pub output: LogStructure,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
     /// file generator.
     #[clap(long, short = 'f')]
@@ -55,7 +55,6 @@ pub enum LogStructure {
 
 impl FromStr for LogStructure {
     type Err = Error;
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.to_ascii_lowercase()[..] {
             "json" => Ok(LogStructure::Json),

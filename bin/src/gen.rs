@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant as StdInstant},
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use governor::{
@@ -102,13 +102,12 @@ impl Generator {
                 UdpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
             }
         };
-        let sender_handle = tokio::spawn(async move {
+        let sender = tokio::spawn(async move {
             if let Err(err) = sender.run().await {
                 error!(?err, "Error in send task");
             }
         });
-        // cleanup
-        let cleanup_handle = self.cleanup_task(Arc::clone(&store), Arc::clone(&stats.atomic_store));
+        let cleanup = self.cleanup_task(Arc::clone(&store), Arc::clone(&stats.atomic_store));
 
         // timers
         let sleep = time::sleep(Duration::from_secs(1));
@@ -155,7 +154,7 @@ impl Generator {
                 _ = self.shutdown.recv() => {
                     trace!("shutdown received");
                     // abort sender
-                    sender_handle.abort();
+                    sender.abort();
                     // final log
                     let (_, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
@@ -163,16 +162,19 @@ impl Generator {
                     // wait for remaining in flight messages or timeouts
                     self.wait_in_flight(store).await;
                     // abort cleanup
-                    cleanup_handle.abort();
+                    cleanup.abort();
                     self.stats_tx.send(stats.totals()).await?;
                     return Ok(());
                 }
             }
         }
 
+        // we should only ever exit via shutdown.recv()
         Ok(())
     }
+
     async fn wait_in_flight(&self, store: Arc<Mutex<Store>>) {
+        let timeout = self.config.timeout;
         let mut interval = time::interval(Duration::from_millis(10));
         let start_wait = StdInstant::now();
         loop {
@@ -181,12 +183,14 @@ impl Generator {
             let empty = store.in_flight.is_empty();
             drop(store);
             let now = StdInstant::now();
-            if empty || (now - start_wait > self.config.timeout) {
+            if empty || (now - start_wait > timeout) {
                 trace!("waited {:?} for cleanup", now - start_wait);
                 return;
             }
         }
     }
+
+    // cleans up timed out message, returning them to in_flight queue
     fn cleanup_task(
         &self,
         store: Arc<Mutex<Store>>,

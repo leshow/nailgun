@@ -21,21 +21,22 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn batch_size(&self) -> u32 {
+    pub const fn batch_size(&self) -> u32 {
         1_000
     }
 
-    pub fn rate_per_gen(&self) -> u32 {
+    pub const fn rate_per_gen(&self) -> u32 {
         self.qps / self.generators as u32
     }
 
-    pub fn qps(&self) -> Qps {
+    pub const fn qps(&self) -> Qps {
         if self.qps == 0 {
             Qps::Unlimited
         } else {
             Qps::Limited(self.qps)
         }
     }
+
     pub fn rate_limiter(&self) -> Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>> {
         if self.qps().is_limited() {
             Some(RateLimiter::direct(Quota::per_second(

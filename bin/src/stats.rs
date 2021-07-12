@@ -1,10 +1,12 @@
 use std::{
     borrow::Cow,
     fmt::Display,
+    io,
     sync::{atomic, Arc},
     time::{Duration, Instant},
 };
 
+use anyhow::Result;
 use rustc_hash::FxHashMap;
 use tracing::info;
 use trust_dns_proto::op::ResponseCode;
@@ -41,6 +43,7 @@ impl Default for StatsTracker {
         }
     }
 }
+
 impl StatsTracker {
     pub fn reset(&mut self) {
         self.min_latency = Duration::from_micros(u64::MAX);
@@ -100,9 +103,18 @@ impl StatsTracker {
         let recv = self.recv;
         let min = self.min_latency();
         // TODO: no div by zero
-        let avg = (self.latency.as_micros() / self.ok_recv as u128) as f32 / 1_000.;
+        let avg = if self.ok_recv != 0 {
+            (self.latency.as_micros() / self.ok_recv as u128) as f32 / 1_000.
+        } else {
+            // ?
+            self.latency.as_micros() as f32 / 1_000.
+        };
         let max = self.max_latency();
-        let avg_size = self.buf_size / self.ok_recv as usize;
+        let avg_size = if self.ok_recv != 0 {
+            self.buf_size / self.ok_recv as usize
+        } else {
+            self.buf_size
+        };
         let ok_recv = self.ok_recv;
         self.intervals += 1;
         let interval = StatsInterval {
@@ -169,6 +181,13 @@ impl Default for StatsInterval {
 }
 
 impl StatsInterval {
+    fn min_latency(&self) -> f32 {
+        if self.min_latency == f32::MAX {
+            0.
+        } else {
+            self.min_latency
+        }
+    }
     pub fn update_totals(&mut self, interval: StatsInterval, intervals: usize) {
         self.duration = interval.duration;
         self.elapsed += interval.elapsed;
@@ -179,7 +198,7 @@ impl StatsInterval {
         self.min_latency = if interval.min_latency != 0. {
             interval.min_latency.min(self.min_latency)
         } else {
-            self.min_latency
+            self.min_latency()
         };
         self.max_latency = interval.max_latency.max(self.max_latency);
         if interval.avg_latency != 0. {
@@ -193,25 +212,42 @@ impl StatsInterval {
             *self.rcodes.entry(rcode).or_insert(0) += count;
         }
     }
-    fn rcodes_summary(&self) {
-        for (rcode, count) in self.rcodes.iter() {
-            let rcode = format!("{:?}", ResponseCode::from(0, *rcode));
-            info!(responses = %format!("{}: {}", rcode, *count));
-        }
-    }
 
-    pub fn summary(&self) {
+    pub fn summary(&self) -> Result<()> {
+        use std::io::Write;
+        let runtime = PrettyDuration(self.duration);
+        let to_percent = (self.timeouts as f32 / self.recv as f32) * 100.;
         info!(
-            runtime = %PrettyDuration(self.duration),
+            runtime = %runtime,
             total_sent = self.sent,
             total_rcvd = self.recv,
             min = %format!("{}ms", self.min_latency),
             avg = %format!("{}ms", self.avg_latency),
             max = %format!("{}ms", self.max_latency),
             avg_size = %format!("{} bytes", self.avg_size),
-            timeouts = %format!("{} ({}%)", self.timeouts, (self.timeouts  as f32/ self.recv as f32) * 100.)
+            timeouts = %format!("{} ({}%)", self.timeouts, to_percent)
         );
-        self.rcodes_summary();
+        // TODO: print this better?
+        for (rcode, count) in self.rcodes.iter() {
+            info!(responses = %format!("{:?}: {}", ResponseCode::from(0, *rcode), *count));
+        }
+        // write it to stdout nicely
+        let stdout = io::stdout();
+        let mut f = stdout.lock();
+        writeln!(f, "-----")?;
+        writeln!(f, "runtime      {}", runtime)?;
+        writeln!(f, "total sent   {}", self.sent)?;
+        writeln!(f, "total rcvd   {}", self.recv)?;
+        writeln!(f, "min latency  {}ms", self.min_latency)?;
+        writeln!(f, "avg latency  {}ms", self.avg_latency)?;
+        writeln!(f, "max latency  {}ms", self.max_latency)?;
+        writeln!(f, "avg size     {} bytes", self.avg_size)?;
+        writeln!(f, "timeouts     {} ({}%)", self.timeouts, to_percent)?;
+        writeln!(f, "responses")?;
+        for (rcode, count) in self.rcodes.iter() {
+            writeln!(f, "   {:?} {}", ResponseCode::from(0, *rcode), *count)?;
+        }
+        Ok(())
     }
 }
 

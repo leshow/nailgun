@@ -57,9 +57,8 @@ use crate::{
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    // tracing_subscriber::fmt::init();
 
-    match args.logs {
+    match args.output {
         LogStructure::Pretty => {
             let fmt_layer = fmt::layer()
                 .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
@@ -104,6 +103,7 @@ fn main() -> Result<()> {
         .build()?;
     trace!(?rt, "tokio runtime created");
 
+    // shutdown mechanism courtesy of https://github.com/tokio-rs/mini-redis
     rt.block_on(async move {
         // When the provided `shutdown` future completes, we must send a shutdown
         // message to all active connections. We use a broadcast channel for this
@@ -136,9 +136,6 @@ fn main() -> Result<()> {
                 trace!("limit reached-- exiting");
             }
         }
-        // Extract the `shutdown_complete` receiver and transmitter
-        // explicitly drop `shutdown_transmitter`. This is important, as the
-        // `.await` below would otherwise never complete.
         let Runner {
             mut shutdown_complete_rx,
             shutdown_complete_tx,
@@ -237,7 +234,7 @@ impl StatsRunner {
             trace!("received stats");
             summary.update_totals(interval, n);
         }
-        summary.summary();
+        summary.summary()?;
         Ok(())
     }
 }
