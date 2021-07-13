@@ -44,6 +44,8 @@ pub struct Args {
     pub limit_secs: u64,
     #[clap(long, default_value = "pretty")]
     pub output: LogStructure,
+    #[clap(short = 'o')]
+    pub log_file: Option<PathBuf>,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
     /// file generator.
     #[clap(long, short = 'f')]

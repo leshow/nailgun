@@ -8,7 +8,17 @@
 
 ## Features
 
-TODO
+`nailgun` does not currently throttle based on # of timeouts but I would like to implement this in the future!
+
+### Rate limiting
+
+You can specify a specific QPS with `-Q`, this allows you to set a desired QPS rate which will be divided up over all the senders.
+
+### Output
+
+`--output` allows you to specify different logging formats, courtesy of `tracing`. "pretty", "json" and "debug" are currently supported with "pretty" as the default. You can use `RUST_LOG` to filter on the output (ex. `RUST_LOG="nailgun=trace"` will print trace level from the nailgun bin only). `nailgun` uses stdout by default, but will log to file if you accompany this with the `-o` flag and a path.
+
+Regardless of these options, a summary is printed to stdout sans-tracing after the run is over.
 
 ## Usage
 
