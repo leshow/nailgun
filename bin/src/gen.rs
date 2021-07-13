@@ -318,6 +318,7 @@ impl BuildGen for UdpGen {
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
+        // bind to a new addr, OS will give us a randomized port
         let src: SocketAddr = match config.addr {
             SocketAddr::V4(_) => ([0, 0, 0, 0], 0).into(),
             SocketAddr::V6(_) => ("::0".parse::<IpAddr>()?, 0).into(),
