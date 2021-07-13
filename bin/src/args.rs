@@ -6,14 +6,18 @@ use std::{net::IpAddr, path::PathBuf, str::FromStr};
 
 /// nailgun is a cli tool for stress testing and benchmarking DNS
 #[derive(Debug, Clap, Clone, PartialEq, Eq)]
-#[clap(version = "0.1.0", author = "Evan Cameron <cameron.evan@gmail.com>")]
+#[clap(author, about, version)]
 pub struct Args {
-    /// IP address to bind to
-    #[clap(long, short = 'b', default_value = "0.0.0.0")]
-    pub ip: IpAddr,
+    /// IP address to bind to. If family not set will
+    /// default to 0.0.0.0
+    #[clap(long, short = 'b')]
+    pub ip: Option<IpAddr>,
     /// which port to nail. Default is 53 for UDP/TCP
     #[clap(long, short = 'p', default_value = "53")]
     pub port: u16,
+    /// which internet family to use, (inet/inet6)
+    #[clap(long, short = 'F', default_value = "inet")]
+    pub family: Family,
     /// the base record to use as the query for generators
     #[clap(long, short = 'r', default_value = "test.com.")]
     pub record: String,
@@ -76,13 +80,32 @@ pub enum Protocol {
 
 impl FromStr for Protocol {
     type Err = Error;
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.to_ascii_lowercase()[..] {
             "udp" => Ok(Protocol::Udp),
             "tcp" => Ok(Protocol::Tcp),
             _ => Err(anyhow!(
                 "unknown protocol type: {:?} must be \"udp\" or \"tcp\"",
+                s
+            )),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Family {
+    INET,
+    INET6,
+}
+
+impl FromStr for Family {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match &s.to_ascii_lowercase()[..] {
+            "inet" => Ok(Family::INET),
+            "inet6" => Ok(Family::INET6),
+            _ => Err(anyhow!(
+                "unknown family type: {:?} must be \"inet\" or \"inet6\"",
                 s
             )),
         }

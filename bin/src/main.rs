@@ -8,7 +8,7 @@
 #![deny(broken_intra_doc_links)]
 #![allow(clippy::cognitive_complexity)]
 
-use std::{convert::TryFrom, time::Duration};
+use std::{convert::TryFrom, net::IpAddr, time::Duration};
 
 use anyhow::{anyhow, Result};
 use clap::Clap;
@@ -36,7 +36,7 @@ mod shutdown;
 mod stats;
 
 use crate::{
-    args::{Args, LogStructure},
+    args::{Args, Family, LogStructure},
     config::Config,
     gen::Generator,
     shutdown::Shutdown,
@@ -56,7 +56,18 @@ use crate::{
 // }
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    // set default address for family if none provided
+    if args.ip.is_none() {
+        match args.family {
+            Family::INET6 => {
+                args.ip = Some("0.0.0.0".parse::<IpAddr>().unwrap());
+            }
+            Family::INET => {
+                args.ip = Some("::0".parse::<IpAddr>().unwrap());
+            }
+        }
+    }
 
     match args.output {
         LogStructure::Pretty => {

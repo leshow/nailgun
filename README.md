@@ -6,7 +6,15 @@
 
 `nailgun` uses `tracing` for logging so you can use the `RUST_LOG` env var in order to control the logging output.
 
+## Features
+
+TODO
+
 ## Usage
+
+```
+nailgun --help
+```
 
 By default `nailgun` will spawn a single threaded tokio runtime and 1 traffic generator:
 
@@ -21,3 +29,19 @@ nailgun -b 0.0.0.0 -p 1953 -w 16 -t 1
 ```
 
 Will spawn 16 OS threads (`w`/`wcount`) on the tokio runtime and 1 traffic generator (`t`/`tcount`) per thread spawned, for a total of 16\*1 = 16 traffic generators.
+
+### Building & Installing
+
+To build locally
+
+```
+cargo build --release
+```
+
+`nailgun` binary will be present in `target/release/nailgun`
+
+To install locally
+
+```
+cargo install
+```

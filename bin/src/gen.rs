@@ -247,7 +247,12 @@ impl TryFrom<&Args> for Config {
     fn try_from(args: &Args) -> Result<Self, Self::Error> {
         Ok(Self {
             protocol: args.protocol,
-            addr: (args.ip, args.port).into(),
+            addr: (
+                args.ip
+                    .expect("This is a bug, IP always has a value at this point"),
+                args.port,
+            )
+                .into(),
             record: Name::from_ascii(&args.record).map_err(|err| {
                 anyhow!(
                     "failed to parse record: {:?}. with error: {:?}",
