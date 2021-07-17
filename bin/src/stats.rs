@@ -12,8 +12,8 @@ use tracing::info;
 use trust_dns_proto::op::ResponseCode;
 
 use crate::{
-    gen::{AtomicStore, QueryInfo},
     msg::BufMsg,
+    store::{AtomicStore, QueryInfo},
 };
 
 #[derive(Debug)]

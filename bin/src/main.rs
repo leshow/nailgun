@@ -34,6 +34,7 @@ mod query;
 mod sender;
 mod shutdown;
 mod stats;
+mod store;
 
 use crate::{
     args::{Args, Family, LogStructure},

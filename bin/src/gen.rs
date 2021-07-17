@@ -1,17 +1,15 @@
 use std::{
-    collections::VecDeque,
-    convert::TryFrom,
     io,
     net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::{
-        atomic::{self, AtomicU64},
+        atomic::{self},
         Arc,
     },
     time::{Duration, Instant as StdInstant},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use bytes::BytesMut;
 use governor::{
@@ -20,8 +18,6 @@ use governor::{
     RateLimiter,
 };
 use parking_lot::Mutex;
-use rand::{seq::SliceRandom, thread_rng};
-use rustc_hash::FxHashMap;
 use tokio::{
     net::{TcpStream, UdpSocket},
     sync::mpsc,
@@ -34,15 +30,15 @@ use tokio_util::{
     udp::UdpFramed,
 };
 use tracing::{error, trace};
-use trust_dns_proto::rr::Name;
 
 use crate::{
-    args::{Args, Protocol},
+    args::Protocol,
     config::Config,
     msg::{BufMsg, TcpDecoder},
     sender::{MsgSend, Sender},
     shutdown::Shutdown,
     stats::{StatsInterval, StatsTracker},
+    store::{AtomicStore, Store},
 };
 
 #[derive(Debug)]
@@ -51,39 +47,6 @@ pub struct Generator {
     pub shutdown: Shutdown,
     pub stats_tx: mpsc::Sender<StatsInterval>,
     pub _shutdown_complete: mpsc::Sender<()>,
-}
-
-#[derive(Debug)]
-pub struct QueryInfo {
-    pub sent: StdInstant,
-    pub len: usize,
-}
-
-#[derive(Debug)]
-pub struct Store {
-    pub ids: VecDeque<u16>,
-    pub in_flight: FxHashMap<u16, QueryInfo>,
-}
-impl Store {
-    pub fn new() -> Self {
-        Self {
-            in_flight: FxHashMap::default(),
-            ids: create_and_shuffle(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct AtomicStore {
-    pub sent: AtomicU64,
-    pub timed_out: AtomicU64,
-}
-
-impl AtomicStore {
-    pub fn reset(&self) {
-        self.sent.store(0, atomic::Ordering::Relaxed);
-        self.timed_out.store(0, atomic::Ordering::Relaxed);
-    }
 }
 
 impl Generator {
@@ -230,40 +193,6 @@ impl Generator {
                 store.ids.extend(ids);
                 drop(store);
             }
-        })
-    }
-}
-
-// create a stack array of random u16's
-fn create_and_shuffle() -> VecDeque<u16> {
-    let mut data: Vec<u16> = (0..u16::max_value()).collect();
-    data.shuffle(&mut thread_rng());
-    VecDeque::from(data)
-}
-
-impl TryFrom<&Args> for Config {
-    type Error = anyhow::Error;
-
-    fn try_from(args: &Args) -> Result<Self, Self::Error> {
-        Ok(Self {
-            protocol: args.protocol,
-            addr: (
-                args.ip
-                    .expect("This is a bug, IP always has a value at this point"),
-                args.port,
-            )
-                .into(),
-            record: Name::from_ascii(&args.record).map_err(|err| {
-                anyhow!(
-                    "failed to parse record: {:?}. with error: {:?}",
-                    args.record,
-                    err
-                )
-            })?,
-            qtype: args.qtype,
-            qps: args.qps,
-            timeout: Duration::from_secs(args.timeout),
-            generators: args.tcount * args.wcount,
         })
     }
 }

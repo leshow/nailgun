@@ -16,11 +16,12 @@ use tokio::{
     net::{tcp::OwnedWriteHalf, UdpSocket},
     task,
 };
+use trust_dns_proto::op::Message;
 
 use crate::{
     config::Config,
-    gen::{AtomicStore, QueryInfo, Store},
     query,
+    store::{AtomicStore, QueryInfo, Store},
 };
 
 #[derive(Debug)]
@@ -50,8 +51,9 @@ impl Sender {
                 if let Some(bucket) = &self.bucket {
                     bucket.until_ready().await;
                 }
-                let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype)
-                    .to_vec()?;
+                let msg = self.gen(next_id).to_vec()?;
+                // let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype)
+                // .to_vec()?;
                 // TODO: better way to do this that locks less?
                 {
                     self.store.lock().in_flight.insert(
@@ -70,6 +72,9 @@ impl Sender {
                     .fetch_add(1, atomic::Ordering::Relaxed);
             }
         }
+    }
+    fn gen(&mut self, id: u16) -> Message {
+        todo!()
     }
 }
 
