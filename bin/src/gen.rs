@@ -35,6 +35,7 @@ use crate::{
     args::Protocol,
     config::Config,
     msg::{BufMsg, TcpDecoder},
+    query::{FileGen, QueryGen, Source, StaticGen},
     sender::{MsgSend, Sender},
     shutdown::Shutdown,
     stats::{StatsInterval, StatsTracker},
@@ -55,15 +56,25 @@ impl Generator {
         let mut stats = StatsTracker::default();
 
         let bucket = self.config.rate_limiter();
+        let query_gen: Box<dyn QueryGen + Send> = match &self.config.src {
+            Source::File(p) => {
+                trace!("using file gen on path {:#?}", p);
+                Box::new(FileGen::new(p)?)
+            }
+            Source::Static { name, qtype } => {
+                trace!("using static gen with {} {:?}", name, qtype);
+                Box::new(StaticGen::new(name.clone(), *qtype))
+            }
+        };
         let (mut reader, mut sender) = match self.config.protocol {
             // TODO: Probably not realistic that each generator maintains one TcpStream.
             // Would need to drop this abstraction in order to have tcp gen open/close multiple
-            // connections
+            // connections?
             Protocol::Tcp => {
-                TcpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
+                TcpGen::build(&store, &stats.atomic_store, &self.config, query_gen, bucket).await?
             }
             Protocol::Udp => {
-                UdpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
+                UdpGen::build(&store, &stats.atomic_store, &self.config, query_gen, bucket).await?
             }
         };
         let sender = tokio::spawn(async move {
@@ -127,12 +138,12 @@ impl Generator {
                     trace!("shutdown received");
                     // abort sender
                     sender.abort();
+                    // wait for remaining in flight messages or timeouts
+                    self.wait_in_flight(&store).await;
                     // final log
                     let (_, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
                     stats.log_stats(elapsed, total_duration, in_flight, ids);
-                    // wait for remaining in flight messages or timeouts
-                    self.wait_in_flight(store).await;
                     // abort cleanup
                     cleanup.abort();
                     self.stats_tx.send(stats.totals()).await?;
@@ -145,7 +156,7 @@ impl Generator {
         Ok(())
     }
 
-    async fn wait_in_flight(&self, store: Arc<Mutex<Store>>) {
+    async fn wait_in_flight(&self, store: &Arc<Mutex<Store>>) {
         let timeout = self.config.timeout;
         let mut interval = time::interval(Duration::from_millis(10));
         let start_wait = StdInstant::now();
@@ -206,6 +217,7 @@ trait BuildGen {
         store: &Arc<Mutex<Store>>,
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
+        query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(
         Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
@@ -221,14 +233,16 @@ impl BuildGen for TcpGen {
         store: &Arc<Mutex<Store>>,
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
+        query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
-        trace!("building TCP generator");
+        trace!("building TCP generator on addr {}", config.addr);
         // TODO: shutdown ?
         let (r, s) = TcpStream::connect(config.addr).await?.into_split();
         let reader = FramedRead::new(r, TcpDecoder { addr: config.addr });
         let sender = Sender {
             config: config.clone(),
+            query_gen,
             s: MsgSend::Tcp { s },
             store: Arc::clone(&store),
             atomic_store: Arc::clone(&atomic_store),
@@ -244,6 +258,7 @@ impl BuildGen for UdpGen {
         store: &Arc<Mutex<Store>>,
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
+        query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
@@ -257,6 +272,7 @@ impl BuildGen for UdpGen {
 
         let recv = UdpFramed::new(r, BytesCodec::new());
         let sender = Sender {
+            query_gen,
             config: config.clone(),
             s: MsgSend::Udp {
                 s,

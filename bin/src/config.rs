@@ -77,7 +77,7 @@ impl TryFrom<&Args> for Config {
             Source::File(f.clone())
         } else {
             Source::Static {
-                record: Name::from_ascii(&args.record).map_err(|err| {
+                name: Name::from_ascii(&args.record).map_err(|err| {
                     anyhow!(
                         "failed to parse record: {:?}. with error: {:?}",
                         args.record,

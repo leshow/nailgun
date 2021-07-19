@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Cursor, Lines},
+    io::{BufRead, BufReader, Lines},
     path::PathBuf,
     str::FromStr,
 };
@@ -14,7 +14,7 @@ use trust_dns_proto::{
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Source {
     File(PathBuf),
-    Static { record: Name, qtype: RecordType },
+    Static { name: Name, qtype: RecordType },
 }
 
 pub trait QueryGen {
@@ -24,7 +24,7 @@ pub trait QueryGen {
 #[derive(Debug)]
 pub struct FileGen {
     rdr: Lines<BufReader<File>>,
-    // could re-use buf so we don't allocate a new string for each Message
+    // could reuse buf so we don't allocate a new string for each Message
     // buf: String,
 }
 
@@ -69,5 +69,11 @@ impl QueryGen for StaticGen {
             .add_query(Query::query(self.name.clone(), self.qtype))
             .set_message_type(MessageType::Query);
         Some(msg)
+    }
+}
+
+impl StaticGen {
+    pub fn new(name: Name, qtype: RecordType) -> Self {
+        Self { name, qtype }
     }
 }

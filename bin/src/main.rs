@@ -62,10 +62,10 @@ fn main() -> Result<()> {
     if args.ip.is_none() {
         match args.family {
             Family::INET6 => {
-                args.ip = Some("0.0.0.0".parse::<IpAddr>().unwrap());
+                args.ip = Some("::0".parse::<IpAddr>().unwrap());
             }
             Family::INET => {
-                args.ip = Some("::0".parse::<IpAddr>().unwrap());
+                args.ip = Some("0.0.0.0".parse::<IpAddr>().unwrap());
             }
         }
     }

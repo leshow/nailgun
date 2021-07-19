@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -16,18 +16,17 @@ use tokio::{
     net::{tcp::OwnedWriteHalf, UdpSocket},
     task,
 };
-use trust_dns_proto::op::Message;
 
 use crate::{
     config::Config,
-    query,
+    query::QueryGen,
     store::{AtomicStore, QueryInfo, Store},
 };
 
-#[derive(Debug)]
 pub struct Sender {
     pub config: Config,
     pub s: MsgSend,
+    pub query_gen: Box<dyn QueryGen + Send>,
     pub store: Arc<Mutex<Store>>,
     pub atomic_store: Arc<AtomicStore>,
     pub bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
@@ -51,7 +50,11 @@ impl Sender {
                 if let Some(bucket) = &self.bucket {
                     bucket.until_ready().await;
                 }
-                let msg = self.gen(next_id).to_vec()?;
+                let msg = self
+                    .query_gen
+                    .next_msg(next_id)
+                    .context("query gen ran out of msgs")?
+                    .to_vec()?;
                 // let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype)
                 // .to_vec()?;
                 // TODO: better way to do this that locks less?
@@ -72,9 +75,6 @@ impl Sender {
                     .fetch_add(1, atomic::Ordering::Relaxed);
             }
         }
-    }
-    fn gen(&mut self, id: u16) -> Message {
-        todo!()
     }
 }
 
