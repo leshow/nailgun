@@ -38,11 +38,11 @@ impl FileGen {
 
 impl QueryGen for FileGen {
     fn next_msg(&mut self, id: u16) -> Option<Message> {
-        let next = self
+        let line = self
             .rdr
             .next()?
             .expect("FileGen encountered an error reading line");
-        let mut next = next.split_ascii_whitespace();
+        let mut next = line.split_ascii_whitespace();
         let name = Name::from_ascii(next.next()?)
             .expect("FileGen encountered an error parsing Name from line");
         let qtype = RecordType::from_str(next.next()?)

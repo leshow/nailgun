@@ -60,7 +60,7 @@ pub enum Qps {
 impl Qps {
     /// Returns `true` if the qps is [`Unlimited`].
     pub fn is_unlimited(&self) -> bool {
-        matches!(self, Self::Unlimited)
+        !self.is_limited()
     }
 
     /// Returns `true` if the qps is [`Limited`].
