@@ -77,12 +77,12 @@ impl Generator {
                 UdpGen::build(&store, &stats.atomic_store, &self.config, query_gen, bucket).await?
             }
         };
-        let sender = tokio::spawn(async move {
+        let mut sender = tokio::spawn(async move {
             if let Err(err) = sender.run().await {
                 error!(?err, "Error in send task");
             }
         });
-        let cleanup = self.cleanup_task(Arc::clone(&store), Arc::clone(&stats.atomic_store));
+        let mut cleanup = self.cleanup_task(Arc::clone(&store), Arc::clone(&stats.atomic_store));
 
         // timers
         let sleep = time::sleep(Duration::from_secs(1));
@@ -134,7 +134,16 @@ impl Generator {
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
-                _ = self.shutdown.recv() => {
+                // if any handle returns or we recv shutdown-- exit generator
+                // TODO: kinda gnarly. we could pass in `shutdown`
+                // separately in `run` so we can have unique access.
+                _ = async {
+                    tokio::select! {
+                        _ = self.shutdown.recv() => {},
+                        _ = &mut sender => {},
+                        _ = &mut cleanup => {}
+                    }
+                } => {
                     trace!("shutdown received");
                     // abort sender
                     sender.abort();

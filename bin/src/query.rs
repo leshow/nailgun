@@ -37,6 +37,7 @@ impl FileGen {
 }
 
 impl QueryGen for FileGen {
+    // TODO: do we just exit when we run out of things to send?
     fn next_msg(&mut self, id: u16) -> Option<Message> {
         let line = self
             .rdr
