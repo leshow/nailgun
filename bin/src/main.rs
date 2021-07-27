@@ -69,41 +69,32 @@ fn main() -> Result<()> {
             }
         }
     }
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .unwrap()
+        .add_directive("tokio_util=off".parse()?);
 
     match args.output {
         LogStructure::Pretty => {
-            let fmt_layer = fmt::layer()
-                .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
-                .with_target(false);
-            let filter_layer = EnvFilter::try_from_default_env()
-                .or_else(|_| EnvFilter::try_new("info"))
-                .unwrap();
-
             tracing_subscriber::registry()
                 .with(filter_layer)
-                .with(fmt_layer)
+                .with(
+                    fmt::layer()
+                        .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                        .with_target(false),
+                )
                 .init();
         }
         LogStructure::Debug => {
-            let fmt_layer = fmt::layer();
-            let filter_layer = EnvFilter::try_from_default_env()
-                .or_else(|_| EnvFilter::try_new("info"))
-                .unwrap();
-
             tracing_subscriber::registry()
                 .with(filter_layer)
-                .with(fmt_layer)
+                .with(fmt::layer())
                 .init();
         }
         LogStructure::Json => {
-            let fmt_layer = fmt::layer().json();
-            let filter_layer = EnvFilter::try_from_default_env()
-                .or_else(|_| EnvFilter::try_new("info"))
-                .unwrap();
-
             tracing_subscriber::registry()
                 .with(filter_layer)
-                .with(fmt_layer)
+                .with(fmt::layer().json())
                 .init();
         }
     }
@@ -227,7 +218,7 @@ impl Runner {
 
 // TODO: do we want this to listen to all generators stats
 // and take care of logging? we could aggregate all the data for
-// each period this way. probably better than lettering each generator
+// each period this way. probably better than letting each generator
 // log separately?
 
 #[derive(Debug)]
