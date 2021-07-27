@@ -56,7 +56,7 @@ impl Generator {
         let mut stats = StatsTracker::default();
 
         let bucket = self.config.rate_limiter();
-        let query_gen: Box<dyn QueryGen + Send> = match &self.config.src {
+        let query_gen: Box<dyn QueryGen + Send> = match &self.config.query_src {
             Source::File(p) => {
                 trace!("using file gen on path {:#?}", p);
                 Box::new(FileGen::new(p)?)
@@ -245,10 +245,15 @@ impl BuildGen for TcpGen {
         query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
-        trace!("building TCP generator on addr {}", config.addr);
+        trace!("building TCP generator with target {}", config.target);
         // TODO: shutdown ?
-        let (r, s) = TcpStream::connect(config.addr).await?.into_split();
-        let reader = FramedRead::new(r, TcpDecoder { addr: config.addr });
+        let (r, s) = TcpStream::connect(config.target).await?.into_split();
+        let reader = FramedRead::new(
+            r,
+            TcpDecoder {
+                target: config.target,
+            },
+        );
         let sender = Sender {
             config: config.clone(),
             query_gen,
@@ -271,12 +276,8 @@ impl BuildGen for UdpGen {
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
-        // bind to a new addr, OS will give us a randomized port
-        let src: SocketAddr = match config.addr {
-            SocketAddr::V4(_) => ([0, 0, 0, 0], 0).into(),
-            SocketAddr::V6(_) => ("::0".parse::<IpAddr>()?, 0).into(),
-        };
-        let r = Arc::new(UdpSocket::bind(src).await?);
+        // bind to specified addr (will be 0.0.0.0 in most cases)
+        let r = Arc::new(UdpSocket::bind((config.bind, 0)).await?);
         let s = Arc::clone(&r);
 
         let recv = UdpFramed::new(r, BytesCodec::new());
@@ -285,7 +286,7 @@ impl BuildGen for UdpGen {
             config: config.clone(),
             s: MsgSend::Udp {
                 s,
-                addr: config.addr,
+                target: config.target,
             },
             store: Arc::clone(&store),
             atomic_store: Arc::clone(&atomic_store),

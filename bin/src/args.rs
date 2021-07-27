@@ -8,6 +8,8 @@ use std::{net::IpAddr, path::PathBuf, str::FromStr};
 #[derive(Debug, Clap, Clone, PartialEq, Eq)]
 #[clap(author, about, version)]
 pub struct Args {
+    /// address or domain send traffic to. An IP or domain
+    pub target: String,
     /// IP address to bind to. If family not set will
     /// default to 0.0.0.0
     #[clap(long, short = 'b')]
@@ -44,6 +46,8 @@ pub struct Args {
     pub limit_secs: u64,
     #[clap(long, default_value = "pretty")]
     pub output: LogStructure,
+    #[clap(short = 'g', default_value = "static")]
+    pub generator: GenType,
     #[clap(short = 'o')]
     pub log_file: Option<PathBuf>,
     /// read records from a file, one per row, QNAME and QTYPE. Used with the
@@ -108,6 +112,30 @@ impl FromStr for Family {
             "inet6" => Ok(Family::INET6),
             _ => Err(anyhow!(
                 "unknown family type: {:?} must be \"inet\" or \"inet6\"",
+                s
+            )),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum GenType {
+    Static,
+    RandomPkt,
+    RandomQName,
+    RandomLabel,
+}
+
+impl FromStr for GenType {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match &s.to_ascii_lowercase()[..] {
+            "static" => Ok(GenType::Static),
+            "randompkt" => Ok(GenType::RandomPkt),
+            "randomqname" => Ok(GenType::RandomQName),
+            "randomlabel" => Ok(GenType::RandomLabel),
+            _ => Err(anyhow!(
+                "unknown generator type: {:?} must be \"static\" / \"randompkt\" / \"randomqname\" / \"randomlabel\"",
                 s
             )),
         }

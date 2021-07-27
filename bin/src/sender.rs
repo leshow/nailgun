@@ -81,8 +81,13 @@ impl Sender {
 // a very simple DNS message sender
 #[derive(Debug)]
 pub enum MsgSend {
-    Tcp { s: OwnedWriteHalf },
-    Udp { s: Arc<UdpSocket>, addr: SocketAddr },
+    Tcp {
+        s: OwnedWriteHalf,
+    },
+    Udp {
+        s: Arc<UdpSocket>,
+        target: SocketAddr,
+    },
 }
 
 impl MsgSend {
@@ -93,8 +98,8 @@ impl MsgSend {
                 s.write_u16(msg.len() as u16).await?;
                 s.write_all(&msg).await?;
             }
-            MsgSend::Udp { s, addr } => {
-                s.send_to(&msg, *addr).await?;
+            MsgSend::Udp { s, target } => {
+                s.send_to(&msg, *target).await?;
             }
         }
         Ok(())

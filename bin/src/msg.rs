@@ -43,7 +43,7 @@ impl From<(Bytes, SocketAddr)> for BufMsg {
 }
 
 pub struct TcpDecoder {
-    pub addr: SocketAddr,
+    pub target: SocketAddr,
 }
 
 impl Decoder for TcpDecoder {
@@ -69,6 +69,6 @@ impl Decoder for TcpDecoder {
 
         src.advance(2); // advance over len
         let buf = src.split_to(length);
-        Ok(Some((buf, self.addr)))
+        Ok(Some((buf, self.target)))
     }
 }

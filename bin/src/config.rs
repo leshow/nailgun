@@ -1,6 +1,11 @@
-use std::{convert::TryFrom, net::SocketAddr, num::NonZeroU32, time::Duration};
+use std::{
+    convert::TryFrom,
+    net::{IpAddr, SocketAddr},
+    num::NonZeroU32,
+    time::Duration,
+};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -15,12 +20,13 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub target: SocketAddr,
     pub protocol: Protocol,
-    pub addr: SocketAddr,
+    pub bind: IpAddr,
     qps: u32,
     pub timeout: Duration,
     pub generators: usize,
-    pub src: Source,
+    pub query_src: Source,
 }
 
 impl Config {
@@ -73,7 +79,9 @@ impl TryFrom<&Args> for Config {
     type Error = anyhow::Error;
 
     fn try_from(args: &Args) -> Result<Self, Self::Error> {
-        let msg_src = if let Some(f) = &args.file {
+        use trust_dns_resolver::{config::*, Resolver};
+
+        let query_src = if let Some(f) = &args.file {
             Source::File(f.clone())
         } else {
             Source::Static {
@@ -88,15 +96,25 @@ impl TryFrom<&Args> for Config {
             }
         };
 
+        let target = match args.target.parse::<IpAddr>() {
+            Ok(target) => target,
+            Err(_) => {
+                // is not an IP, so see if we can resolve it over dns
+                let resolver =
+                    Resolver::new(ResolverConfig::default(), ResolverOpts::default()).unwrap();
+                let response = resolver.lookup_ip(args.target.clone()).unwrap();
+
+                response
+                    .iter()
+                    .next()
+                    .context("Resolver failed to return an addr")?
+            }
+        };
         Ok(Self {
+            target: (target, args.port).into(),
             protocol: args.protocol,
-            addr: (
-                args.ip
-                    .expect("This is a bug, IP always has a value at this point"),
-                args.port,
-            )
-                .into(),
-            src: msg_src,
+            bind: args.ip.context("Args::ip always has a value")?,
+            query_src,
             qps: args.qps,
             timeout: Duration::from_secs(args.timeout),
             generators: args.tcount * args.wcount,

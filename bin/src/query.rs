@@ -78,3 +78,26 @@ impl StaticGen {
         Self { name, qtype }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RandomPkt {
+    name: Name,
+    qtype: RecordType,
+}
+
+impl QueryGen for RandomPkt {
+    /// generate a simple query using a given id, record and qtype
+    fn next_msg(&mut self, id: u16) -> Option<Message> {
+        let mut msg = Message::new();
+        msg.set_id(id)
+            .add_query(Query::query(self.name.clone(), self.qtype))
+            .set_message_type(MessageType::Query);
+        Some(msg)
+    }
+}
+
+impl RandomPkt {
+    pub fn new(name: Name, qtype: RecordType) -> Self {
+        Self { name, qtype }
+    }
+}
