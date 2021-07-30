@@ -55,3 +55,12 @@ To install locally
 ```
 cargo install
 ```
+
+### TODO
+
+- output file for metrics
+- metric collection needs to be more solid, I sometimes get a few dropped msgs
+- use a single task for logging metrics so all concurrent runners are combined instead of them each logging individually
+- more generator types
+- we can leverage trustdns to make options for interesting types of queries. mDNS? DOH?
+- experiment with tokio-uring? if we switch to concurrent single-threaded

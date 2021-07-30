@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error};
 use clap::Clap;
-use trust_dns_proto::rr::RecordType;
+use trust_dns_proto::rr::{DNSClass, RecordType};
 
 use std::{net::IpAddr, path::PathBuf, str::FromStr};
 
@@ -23,9 +23,12 @@ pub struct Args {
     /// the base record to use as the query for generators
     #[clap(long, short = 'r', default_value = "test.com.")]
     pub record: String,
-    /// the query type to use for generators. Default is A.
+    /// the query type to use for generators
     #[clap(long, short = 'T', default_value = "A")]
     pub qtype: RecordType,
+    /// the query class to use
+    #[clap(long, default_value = "IN")]
+    pub class: DNSClass,
     /// query timeout in seconds
     #[clap(long, short = 't', default_value = "2")]
     pub timeout: u64,

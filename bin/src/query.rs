@@ -8,13 +8,17 @@ use std::{
 use anyhow::Result;
 use trust_dns_proto::{
     op::{Message, MessageType, Query},
-    rr::{Name, RecordType},
+    rr::{DNSClass, Name, RecordType},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Source {
     File(PathBuf),
-    Static { name: Name, qtype: RecordType },
+    Static {
+        name: Name,
+        qtype: RecordType,
+        class: DNSClass,
+    },
 }
 
 pub trait QueryGen {
@@ -60,22 +64,27 @@ impl QueryGen for FileGen {
 pub struct StaticGen {
     name: Name,
     qtype: RecordType,
+    class: DNSClass,
 }
 
 impl QueryGen for StaticGen {
     /// generate a simple query using a given id, record and qtype
     fn next_msg(&mut self, id: u16) -> Option<Message> {
         let mut msg = Message::new();
+        let mut query = Query::query(self.name.clone(), self.qtype);
+        if self.class != DNSClass::IN {
+            query.set_query_class(self.class);
+        }
         msg.set_id(id)
-            .add_query(Query::query(self.name.clone(), self.qtype))
+            .add_query(query)
             .set_message_type(MessageType::Query);
         Some(msg)
     }
 }
 
 impl StaticGen {
-    pub fn new(name: Name, qtype: RecordType) -> Self {
-        Self { name, qtype }
+    pub fn new(name: Name, qtype: RecordType, class: DNSClass) -> Self {
+        Self { name, qtype, class }
     }
 }
 

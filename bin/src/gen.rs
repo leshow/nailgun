@@ -1,6 +1,6 @@
 use std::{
     io,
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     pin::Pin,
     sync::{
         atomic::{self},
@@ -56,32 +56,19 @@ impl Generator {
         let mut stats = StatsTracker::default();
 
         let bucket = self.config.rate_limiter();
-        let query_gen: Box<dyn QueryGen + Send> = match &self.config.query_src {
-            Source::File(p) => {
-                trace!("using file gen on path {:#?}", p);
-                Box::new(FileGen::new(p)?)
-            }
-            Source::Static { name, qtype } => {
-                trace!("using static gen with {} {:?}", name, qtype);
-                Box::new(StaticGen::new(name.clone(), *qtype))
-            }
-        };
-        let (mut reader, mut sender) = match self.config.protocol {
+
+        let (mut reader, sender) = match self.config.protocol {
             // TODO: Probably not realistic that each generator maintains one TcpStream.
             // Would need to drop this abstraction in order to have tcp gen open/close multiple
             // connections?
             Protocol::Tcp => {
-                TcpGen::build(&store, &stats.atomic_store, &self.config, query_gen, bucket).await?
+                TcpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
             }
             Protocol::Udp => {
-                UdpGen::build(&store, &stats.atomic_store, &self.config, query_gen, bucket).await?
+                UdpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
             }
         };
-        let mut sender = tokio::spawn(async move {
-            if let Err(err) = sender.run().await {
-                error!(?err, "Error in send task");
-            }
-        });
+        let mut sender = self.sender_task(sender)?;
         let mut cleanup = self.cleanup_task(Arc::clone(&store), Arc::clone(&stats.atomic_store));
 
         // timers
@@ -215,6 +202,30 @@ impl Generator {
             }
         })
     }
+    fn sender_task(&self, mut sender: Sender) -> Result<JoinHandle<()>> {
+        Ok(match &self.config.query_src {
+            Source::File(p) => {
+                trace!("using file gen on path {:#?}", p);
+                let query_gen = FileGen::new(p)?;
+                // TODO: can we reduce the code duplication here without using
+                // dynamic types?
+                tokio::spawn(async move {
+                    if let Err(err) = sender.run(query_gen).await {
+                        error!(?err, "Error in send task");
+                    }
+                })
+            }
+            Source::Static { name, qtype, class } => {
+                trace!("using static gen with {} {:?} {}", name, qtype, class);
+                let query_gen = StaticGen::new(name.clone(), *qtype, *class);
+                tokio::spawn(async move {
+                    if let Err(err) = sender.run(query_gen).await {
+                        error!(?err, "Error in send task");
+                    }
+                })
+            }
+        })
+    }
 }
 
 struct TcpGen;
@@ -226,7 +237,6 @@ trait BuildGen {
         store: &Arc<Mutex<Store>>,
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
-        query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(
         Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
@@ -242,7 +252,6 @@ impl BuildGen for TcpGen {
         store: &Arc<Mutex<Store>>,
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
-        query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building TCP generator with target {}", config.target);
@@ -256,7 +265,6 @@ impl BuildGen for TcpGen {
         );
         let sender = Sender {
             config: config.clone(),
-            query_gen,
             s: MsgSend::Tcp { s },
             store: Arc::clone(&store),
             atomic_store: Arc::clone(&atomic_store),
@@ -272,7 +280,6 @@ impl BuildGen for UdpGen {
         store: &Arc<Mutex<Store>>,
         atomic_store: &Arc<AtomicStore>,
         config: &Config,
-        query_gen: Box<dyn QueryGen + Send>,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
@@ -282,7 +289,6 @@ impl BuildGen for UdpGen {
 
         let recv = UdpFramed::new(r, BytesCodec::new());
         let sender = Sender {
-            query_gen,
             config: config.clone(),
             s: MsgSend::Udp {
                 s,

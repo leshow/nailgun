@@ -10,7 +10,7 @@
 
 use std::{convert::TryFrom, net::IpAddr, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::Clap;
 use tokio::{
     runtime::Builder,
@@ -40,6 +40,7 @@ use crate::{
     args::{Args, Family, LogStructure},
     config::Config,
     gen::Generator,
+    query::{FileGen, Source, StaticGen},
     shutdown::Shutdown,
     stats::StatsInterval,
 };
@@ -74,29 +75,70 @@ fn main() -> Result<()> {
         .unwrap()
         .add_directive("tokio_util=off".parse()?);
 
-    match args.output {
-        LogStructure::Pretty => {
-            tracing_subscriber::registry()
-                .with(filter_layer)
-                .with(
-                    fmt::layer()
-                        .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
-                        .with_target(false),
-                )
-                .init();
+    // TODO: logging to file not working just yet
+    // this type of duplication is unfortunate
+    match &args.log_file {
+        Some(file) => {
+            let appender = tracing_appender::rolling::never(
+                file.parent()
+                    .with_context(|| format!("failed to start log on file {:#?}", file))?,
+                file.file_name()
+                    .with_context(|| format!("failed to start log on file {:#?}", file))?,
+            );
+
+            let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
+            let fmt = fmt::layer()
+                .with_writer(non_blocking_appender)
+                .with_writer(std::io::stdout);
+
+            match args.output {
+                LogStructure::Pretty => {
+                    tracing_subscriber::registry()
+                        .with(filter_layer)
+                        .with(
+                            fmt.fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                                .with_target(false),
+                        )
+                        .init();
+                }
+                LogStructure::Debug => {
+                    tracing_subscriber::registry()
+                        .with(filter_layer)
+                        .with(fmt)
+                        .init();
+                }
+                LogStructure::Json => {
+                    tracing_subscriber::registry()
+                        .with(filter_layer)
+                        .with(fmt.json())
+                        .init();
+                }
+            }
         }
-        LogStructure::Debug => {
-            tracing_subscriber::registry()
-                .with(filter_layer)
-                .with(fmt::layer())
-                .init();
-        }
-        LogStructure::Json => {
-            tracing_subscriber::registry()
-                .with(filter_layer)
-                .with(fmt::layer().json())
-                .init();
-        }
+        None => match args.output {
+            LogStructure::Pretty => {
+                tracing_subscriber::registry()
+                    .with(filter_layer)
+                    .with(
+                        fmt::layer()
+                            .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                            .with_target(false),
+                    )
+                    .init();
+            }
+            LogStructure::Debug => {
+                tracing_subscriber::registry()
+                    .with(filter_layer)
+                    .with(fmt::layer())
+                    .init();
+            }
+            LogStructure::Json => {
+                tracing_subscriber::registry()
+                    .with(filter_layer)
+                    .with(fmt::layer().json())
+                    .init();
+            }
+        },
     }
 
     trace!("{:?}", args);

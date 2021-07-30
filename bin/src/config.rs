@@ -93,6 +93,7 @@ impl TryFrom<&Args> for Config {
                     )
                 })?,
                 qtype: args.qtype,
+                class: args.class,
             }
         };
 

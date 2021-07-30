@@ -26,14 +26,13 @@ use crate::{
 pub struct Sender {
     pub config: Config,
     pub s: MsgSend,
-    pub query_gen: Box<dyn QueryGen + Send>,
     pub store: Arc<Mutex<Store>>,
     pub atomic_store: Arc<AtomicStore>,
     pub bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
 }
 
 impl Sender {
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run<T: QueryGen>(&mut self, mut query_gen: T) -> Result<()> {
         loop {
             let num = self.config.batch_size();
             task::yield_now().await;
@@ -50,8 +49,7 @@ impl Sender {
                 if let Some(bucket) = &self.bucket {
                     bucket.until_ready().await;
                 }
-                let msg = self
-                    .query_gen
+                let msg = query_gen
                     .next_msg(next_id)
                     .context("query gen ran out of msgs")?
                     .to_vec()?;
