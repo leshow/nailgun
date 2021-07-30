@@ -10,7 +10,7 @@
 
 use std::{convert::TryFrom, net::IpAddr, time::Duration};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use clap::Clap;
 use tokio::{
     runtime::Builder,
@@ -19,16 +19,11 @@ use tokio::{
     time,
 };
 use tracing::{error, info, trace};
-use tracing_subscriber::{
-    fmt::{self, format::Pretty},
-    prelude::__tracing_subscriber_SubscriberExt,
-    util::SubscriberInitExt,
-    EnvFilter,
-};
 
 mod args;
 mod config;
 mod gen;
+mod logs;
 mod msg;
 mod query;
 mod sender;
@@ -37,25 +32,12 @@ mod stats;
 mod store;
 
 use crate::{
-    args::{Args, Family, LogStructure},
+    args::{Args, Family},
     config::Config,
     gen::Generator,
-    query::{FileGen, Source, StaticGen},
     shutdown::Shutdown,
     stats::StatsInterval,
 };
-
-// TODO: custom logging output format?
-// struct Output;
-// impl<'writer> FormatFields<'writer> for Output {
-//     fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
-//         &self,
-//         writer: &'writer mut dyn std::fmt::Write,
-//         fields: R,
-//     ) -> std::fmt::Result {
-//         todo!()
-//     }
-// }
 
 fn main() -> Result<()> {
     let mut args = Args::parse();
@@ -70,76 +52,8 @@ fn main() -> Result<()> {
             }
         }
     }
-    let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("info"))
-        .unwrap()
-        .add_directive("tokio_util=off".parse()?);
 
-    // TODO: logging to file not working just yet
-    // this type of duplication is unfortunate
-    match &args.log_file {
-        Some(file) => {
-            let appender = tracing_appender::rolling::never(
-                file.parent()
-                    .with_context(|| format!("failed to start log on file {:#?}", file))?,
-                file.file_name()
-                    .with_context(|| format!("failed to start log on file {:#?}", file))?,
-            );
-
-            let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
-            let fmt = fmt::layer()
-                .with_writer(non_blocking_appender)
-                .with_writer(std::io::stdout);
-
-            match args.output {
-                LogStructure::Pretty => {
-                    tracing_subscriber::registry()
-                        .with(filter_layer)
-                        .with(
-                            fmt.fmt_fields(Pretty::with_source_location(Pretty::default(), false))
-                                .with_target(false),
-                        )
-                        .init();
-                }
-                LogStructure::Debug => {
-                    tracing_subscriber::registry()
-                        .with(filter_layer)
-                        .with(fmt)
-                        .init();
-                }
-                LogStructure::Json => {
-                    tracing_subscriber::registry()
-                        .with(filter_layer)
-                        .with(fmt.json())
-                        .init();
-                }
-            }
-        }
-        None => match args.output {
-            LogStructure::Pretty => {
-                tracing_subscriber::registry()
-                    .with(filter_layer)
-                    .with(
-                        fmt::layer()
-                            .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
-                            .with_target(false),
-                    )
-                    .init();
-            }
-            LogStructure::Debug => {
-                tracing_subscriber::registry()
-                    .with(filter_layer)
-                    .with(fmt::layer())
-                    .init();
-            }
-            LogStructure::Json => {
-                tracing_subscriber::registry()
-                    .with(filter_layer)
-                    .with(fmt::layer().json())
-                    .init();
-            }
-        },
-    }
+    let _guard = logs::setup(&args);
 
     trace!("{:?}", args);
     let rt = Builder::new_multi_thread()
