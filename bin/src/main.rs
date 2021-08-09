@@ -8,7 +8,11 @@
 #![deny(broken_intra_doc_links)]
 #![allow(clippy::cognitive_complexity)]
 
-use std::{convert::TryFrom, net::IpAddr, time::Duration};
+use std::{
+    convert::TryFrom,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    time::Duration,
+};
 
 use anyhow::{anyhow, Result};
 use clap::Clap;
@@ -44,11 +48,11 @@ fn main() -> Result<()> {
     // set default address for family if none provided
     if args.ip.is_none() {
         match args.family {
-            Family::INET6 => {
-                args.ip = Some("::0".parse::<IpAddr>().unwrap());
+            Family::INet6 => {
+                args.ip = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
             }
-            Family::INET => {
-                args.ip = Some("0.0.0.0".parse::<IpAddr>().unwrap());
+            Family::INet => {
+                args.ip = Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
             }
         }
     }

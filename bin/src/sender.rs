@@ -51,8 +51,7 @@ impl Sender {
                 }
                 let msg = query_gen
                     .next_msg(next_id)
-                    .context("query gen ran out of msgs")?
-                    .to_vec()?;
+                    .context("query gen ran out of msgs")?;
                 // let msg = query::simple(next_id, self.config.record.clone(), self.config.qtype)
                 // .to_vec()?;
                 // TODO: better way to do this that locks less?
@@ -94,10 +93,10 @@ impl MsgSend {
             MsgSend::Tcp { s } => {
                 // write the message out
                 s.write_u16(msg.len() as u16).await?;
-                s.write_all(&msg).await?;
+                s.write_all(msg).await?;
             }
             MsgSend::Udp { s, target } => {
-                s.send_to(&msg, *target).await?;
+                s.send_to(msg, *target).await?;
             }
         }
         Ok(())

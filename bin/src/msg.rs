@@ -12,7 +12,7 @@ pub struct BufMsg {
 impl BufMsg {
     /// Construct a new `BufMsg` with an address
     pub fn new(buf: Bytes, addr: SocketAddr) -> Self {
-        BufMsg { buf, addr }
+        Self { buf, addr }
     }
 
     /// Return a reference to internal bytes

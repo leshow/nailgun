@@ -35,7 +35,7 @@ use crate::{
     args::Protocol,
     config::Config,
     msg::{BufMsg, TcpDecoder},
-    query::{FileGen, QueryGen, Source, StaticGen},
+    query::{FileGen, RandomPkt, RandomQName, Source, StaticGen},
     sender::{MsgSend, Sender},
     shutdown::Shutdown,
     stats::{StatsInterval, StatsTracker},
@@ -203,12 +203,13 @@ impl Generator {
         })
     }
     fn sender_task(&self, mut sender: Sender) -> Result<JoinHandle<()>> {
+        // TODO: can we reduce the code duplication here without using
+        // dynamic types?
         Ok(match &self.config.query_src {
             Source::File(p) => {
                 trace!("using file gen on path {:#?}", p);
                 let query_gen = FileGen::new(p)?;
-                // TODO: can we reduce the code duplication here without using
-                // dynamic types?
+
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
                         error!(?err, "Error in send task");
@@ -218,6 +219,24 @@ impl Generator {
             Source::Static { name, qtype, class } => {
                 trace!("using static gen with {} {:?} {}", name, qtype, class);
                 let query_gen = StaticGen::new(name.clone(), *qtype, *class);
+                tokio::spawn(async move {
+                    if let Err(err) = sender.run(query_gen).await {
+                        error!(?err, "Error in send task");
+                    }
+                })
+            }
+            Source::RandomPkt { size } => {
+                trace!("using randompkt gen with len {}", *size);
+                let query_gen = RandomPkt::new(*size);
+                tokio::spawn(async move {
+                    if let Err(err) = sender.run(query_gen).await {
+                        error!(?err, "Error in send task");
+                    }
+                })
+            }
+            Source::RandomQName { size, qtype } => {
+                trace!("using randomqname gen with len {} {:?}", *size, qtype);
+                let query_gen = RandomQName::new(*qtype, *size);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
                         error!(?err, "Error in send task");
@@ -266,8 +285,8 @@ impl BuildGen for TcpGen {
         let sender = Sender {
             config: config.clone(),
             s: MsgSend::Tcp { s },
-            store: Arc::clone(&store),
-            atomic_store: Arc::clone(&atomic_store),
+            store: Arc::clone(store),
+            atomic_store: Arc::clone(atomic_store),
             bucket,
         };
         Ok((Box::pin(reader), sender))
@@ -294,8 +313,8 @@ impl BuildGen for UdpGen {
                 s,
                 target: config.target,
             },
-            store: Arc::clone(&store),
-            atomic_store: Arc::clone(&atomic_store),
+            store: Arc::clone(store),
+            atomic_store: Arc::clone(atomic_store),
             bucket,
         };
         Ok((Box::pin(recv), sender))

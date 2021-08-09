@@ -6,6 +6,8 @@ use std::{
 };
 
 use anyhow::Result;
+use rand::Rng;
+use tracing::error;
 use trust_dns_proto::{
     op::{Message, MessageType, Query},
     rr::{DNSClass, Name, RecordType},
@@ -19,10 +21,17 @@ pub enum Source {
         qtype: RecordType,
         class: DNSClass,
     },
+    RandomPkt {
+        size: usize,
+    },
+    RandomQName {
+        qtype: RecordType,
+        size: usize,
+    },
 }
 
 pub trait QueryGen {
-    fn next_msg(&mut self, id: u16) -> Option<Message>;
+    fn next_msg(&mut self, id: u16) -> Option<Vec<u8>>;
 }
 
 #[derive(Debug)]
@@ -42,7 +51,7 @@ impl FileGen {
 
 impl QueryGen for FileGen {
     // TODO: do we just exit when we run out of things to send?
-    fn next_msg(&mut self, id: u16) -> Option<Message> {
+    fn next_msg(&mut self, id: u16) -> Option<Vec<u8>> {
         let line = self
             .rdr
             .next()?
@@ -56,7 +65,14 @@ impl QueryGen for FileGen {
         msg.set_id(id)
             .add_query(Query::query(name, qtype))
             .set_message_type(MessageType::Query);
-        Some(msg)
+
+        match msg.to_vec() {
+            Ok(msg) => Some(msg),
+            Err(err) => {
+                error!(?err);
+                None
+            }
+        }
     }
 }
 
@@ -69,7 +85,7 @@ pub struct StaticGen {
 
 impl QueryGen for StaticGen {
     /// generate a simple query using a given id, record and qtype
-    fn next_msg(&mut self, id: u16) -> Option<Message> {
+    fn next_msg(&mut self, id: u16) -> Option<Vec<u8>> {
         let mut msg = Message::new();
         let mut query = Query::query(self.name.clone(), self.qtype);
         if self.class != DNSClass::IN {
@@ -78,7 +94,13 @@ impl QueryGen for StaticGen {
         msg.set_id(id)
             .add_query(query)
             .set_message_type(MessageType::Query);
-        Some(msg)
+        match msg.to_vec() {
+            Ok(msg) => Some(msg),
+            Err(err) => {
+                error!(?err);
+                None
+            }
+        }
     }
 }
 
@@ -90,23 +112,66 @@ impl StaticGen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RandomPkt {
-    name: Name,
-    qtype: RecordType,
+    len: usize,
 }
 
 impl QueryGen for RandomPkt {
-    /// generate a simple query using a given id, record and qtype
-    fn next_msg(&mut self, id: u16) -> Option<Message> {
-        let mut msg = Message::new();
-        msg.set_id(id)
-            .add_query(Query::query(self.name.clone(), self.qtype))
-            .set_message_type(MessageType::Query);
+    /// generate a random message
+    fn next_msg(&mut self, id: u16) -> Option<Vec<u8>> {
+        let mut msg = id.to_be_bytes().to_vec();
+        msg.extend((0..self.len).map(|_| rand::random::<u8>()));
         Some(msg)
     }
 }
 
 impl RandomPkt {
-    pub fn new(name: Name, qtype: RecordType) -> Self {
-        Self { name, qtype }
+    pub fn new(len: usize) -> Self {
+        Self { len }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RandomQName {
+    len: usize,
+    qtype: RecordType,
+}
+
+impl QueryGen for RandomQName {
+    /// generate a random label only
+    fn next_msg(&mut self, id: u16) -> Option<Vec<u8>> {
+        use rand::distributions::Alphanumeric;
+        let gen_label = |len| {
+            let rng = rand::thread_rng();
+            rng.sample_iter(Alphanumeric)
+                .map(char::from)
+                .take(len)
+                .collect::<String>()
+        };
+
+        let qname = match Name::from_str(&gen_label(self.len)) {
+            Ok(qname) => Some(qname),
+            Err(err) => {
+                error!(?err);
+                None
+            }
+        }?;
+
+        let mut msg = Message::new();
+        msg.set_id(id)
+            .add_query(Query::query(qname, self.qtype))
+            .set_message_type(MessageType::Query);
+        match msg.to_vec() {
+            Ok(msg) => Some(msg),
+            Err(err) => {
+                error!(?err);
+                None
+            }
+        }
+    }
+}
+
+impl RandomQName {
+    pub fn new(qtype: RecordType, len: usize) -> Self {
+        Self { qtype, len }
     }
 }

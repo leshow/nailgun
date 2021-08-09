@@ -14,7 +14,7 @@ use governor::{
 use trust_dns_proto::rr::Name;
 
 use crate::{
-    args::{Args, Protocol},
+    args::{Args, GenType, Protocol},
     query::Source,
 };
 
@@ -81,10 +81,9 @@ impl TryFrom<&Args> for Config {
     fn try_from(args: &Args) -> Result<Self, Self::Error> {
         use trust_dns_resolver::{config::*, Resolver};
 
-        let query_src = if let Some(f) = &args.file {
-            Source::File(f.clone())
-        } else {
-            Source::Static {
+        let query_src = match &args.generator {
+            GenType::File(path) => Source::File(path.clone()),
+            GenType::Static => Source::Static {
                 name: Name::from_ascii(&args.record).map_err(|err| {
                     anyhow!(
                         "failed to parse record: {:?}. with error: {:?}",
@@ -94,7 +93,12 @@ impl TryFrom<&Args> for Config {
                 })?,
                 qtype: args.qtype,
                 class: args.class,
-            }
+            },
+            GenType::RandomPkt { size } => Source::RandomPkt { size: *size },
+            GenType::RandomQName { size } => Source::RandomQName {
+                size: *size,
+                qtype: args.qtype,
+            },
         };
 
         let target = match args.target.parse::<IpAddr>() {

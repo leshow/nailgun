@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Context, Error};
 use clap::Clap;
 use trust_dns_proto::rr::{DNSClass, RecordType};
 
@@ -50,16 +50,12 @@ pub struct Args {
     /// log output format (pretty/json/debug)
     #[clap(long, default_value = "pretty")]
     pub output: LogStructure,
-    /// query generator type (static/randompkt/randomlabel/randomqname)
-    #[clap(short = 'g', default_value = "static")]
+    /// query generator type (static/file/randompkt/randomqname)
+    #[clap(short = 'g', parse(try_from_str = parse_gentype), default_value = "static")]
     pub generator: GenType,
     /// output file for logs/metrics
     #[clap(short = 'o')]
     pub log_file: Option<PathBuf>,
-    /// read records from a file, one per row, QNAME and QTYPE. Used with the
-    /// file generator.
-    #[clap(long, short = 'f')]
-    pub file: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -106,16 +102,16 @@ impl FromStr for Protocol {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Family {
-    INET,
-    INET6,
+    INet,
+    INet6,
 }
 
 impl FromStr for Family {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match &s.to_ascii_lowercase()[..] {
-            "inet" => Ok(Family::INET),
-            "inet6" => Ok(Family::INET6),
+            "inet" => Ok(Family::INet),
+            "inet6" => Ok(Family::INet6),
             _ => Err(anyhow!(
                 "unknown family type: {:?} must be \"inet\" or \"inet6\"",
                 s
@@ -124,26 +120,54 @@ impl FromStr for Family {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum GenType {
     Static,
-    RandomPkt,
-    RandomQName,
-    RandomLabel,
+    RandomPkt { size: usize },
+    RandomQName { size: usize },
+    File(PathBuf),
 }
 
-impl FromStr for GenType {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match &s.to_ascii_lowercase()[..] {
-            "static" => Ok(GenType::Static),
-            "randompkt" => Ok(GenType::RandomPkt),
-            "randomqname" => Ok(GenType::RandomQName),
-            "randomlabel" => Ok(GenType::RandomLabel),
-            _ => Err(anyhow!(
-                "unknown generator type: {:?} must be \"static\" / \"randompkt\" / \"randomqname\" / \"randomlabel\"",
-                s
-            )),
-        }
+fn parse_key_val<T>(key: &str, s: Option<&[&str]>) -> anyhow::Result<T>
+where
+    T: FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+{
+    match s {
+        Some(&[k, size]) if k == key => Ok(size.parse()?),
+        _ => Err(anyhow!("failed to parse input",)),
     }
+}
+
+fn parse_gentype(s: &str) -> anyhow::Result<GenType> {
+    let s = s.trim();
+    if s.strip_prefix("static").is_some() {
+        return Ok(GenType::Static);
+    }
+    if let Some(s) = s.strip_prefix("file") {
+        let pos = s
+            .find(' ')
+            .ok_or_else(|| anyhow!("invalid: no <space> found in `{}`", s))?;
+        return Ok(GenType::File(s[pos + 1..].parse()?));
+    }
+    if let Some(s) = s.strip_prefix("randompkt") {
+        let vars = s.rsplit('=').collect::<Vec<_>>();
+        let mut iter = vars.chunks_exact(2);
+        let size = parse_key_val("size", iter.next())
+            .with_context(|| format!("invalid: failed to parse randompkt generator in `{}`", s))?;
+        return Ok(GenType::RandomPkt { size });
+    }
+    if let Some(s) = s.strip_prefix("randomlabel") {
+        let vars = s.rsplit('=').collect::<Vec<_>>();
+        let mut iter = vars.chunks_exact(2);
+        let size = parse_key_val("size", iter.next())
+            .with_context(|| format!("invalid: failed to parse randomlabel in `{}`", s))?;
+        return Ok(GenType::RandomQName { size });
+    }
+
+    Err(anyhow!(
+        "invalid: generator type does not match in `{}`\n 
+    must be one of \"static\" / \"randompkt\" / \"randomqname\"",
+        s
+    ))
 }
