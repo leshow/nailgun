@@ -1,12 +1,8 @@
 use std::{
     io,
     net::SocketAddr,
-    ops::AddAssign,
     pin::Pin,
-    sync::{
-        atomic::{self},
-        Arc,
-    },
+    sync::Arc,
     time::{Duration, Instant as StdInstant},
 };
 
@@ -174,11 +170,7 @@ impl Generator {
             interval.tick().await;
             let mut store = store.lock();
             // could rely on cleanup_task?
-            let len = store.clear_timeouts(timeout);
-            atomic_store
-                .timed_out
-                .fetch_add(len as u64, atomic::Ordering::Relaxed);
-
+            store.clear_timeouts(timeout, atomic_store);
             let empty = store.in_flight.is_empty();
             let now = StdInstant::now();
             if empty || (now - start_wait > timeout) {
@@ -202,10 +194,7 @@ impl Generator {
             loop {
                 sleep.tick().await;
                 let mut store = store.lock();
-                let len = store.clear_timeouts(timeout);
-                atomic_store
-                    .timed_out
-                    .fetch_add(len as u64, atomic::Ordering::Relaxed);
+                store.clear_timeouts(timeout, &atomic_store);
                 drop(store);
             }
         })

@@ -1,6 +1,9 @@
 use std::{
     collections::VecDeque,
-    sync::atomic::{self, AtomicU64},
+    sync::{
+        atomic::{self, AtomicU64},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
@@ -26,7 +29,7 @@ impl Store {
             ids: create_and_shuffle(),
         }
     }
-    pub fn clear_timeouts(&mut self, timeout: Duration) -> usize {
+    pub fn clear_timeouts(&mut self, timeout: Duration, atomic_store: &Arc<AtomicStore>) {
         let now = Instant::now();
         let mut ids = Vec::new();
         // remove all timed out ids from in_flight
@@ -38,11 +41,12 @@ impl Store {
                 true
             }
         });
-        let len = ids.len();
+        atomic_store
+            .timed_out
+            .fetch_add(ids.len() as u64, atomic::Ordering::Relaxed);
+
         // add back the ids so they can be used
         self.ids.extend(ids);
-
-        len
     }
 }
 

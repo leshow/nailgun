@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Error};
+use anyhow::{anyhow, Error};
 use clap::Clap;
 use trust_dns_proto::rr::{DNSClass, RecordType};
 
