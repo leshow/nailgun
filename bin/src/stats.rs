@@ -240,10 +240,10 @@ impl StatsInterval {
     pub fn summary(&self) -> Result<()> {
         use std::io::Write;
         let runtime = PrettyDuration(self.duration);
-        let to_percent = if self.recv == 0 {
-            100.
+        let to_percent = if self.sent == 0 {
+            0.
         } else {
-            (self.timeouts as f32 / self.recv as f32) * 100.
+            (self.timeouts as f32 / self.sent as f32) * 100.
         };
         info!(
             runtime = %runtime,

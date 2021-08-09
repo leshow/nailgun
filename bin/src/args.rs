@@ -51,8 +51,8 @@ pub struct Args {
     #[clap(long, default_value = "pretty")]
     pub output: LogStructure,
     /// query generator type (static/file/randompkt/randomqname)
-    #[clap(short = 'g', parse(try_from_str = parse_gentype), default_value = "static")]
-    pub generator: GenType,
+    #[clap(subcommand)]
+    pub generator: Option<GenType>,
     /// output file for logs/metrics
     #[clap(short = 'o')]
     pub log_file: Option<PathBuf>,
@@ -120,54 +120,21 @@ impl FromStr for Family {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clap, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum GenType {
     Static,
-    RandomPkt { size: usize },
-    RandomQName { size: usize },
-    File(PathBuf),
-}
-
-fn parse_key_val<T>(key: &str, s: Option<&[&str]>) -> anyhow::Result<T>
-where
-    T: FromStr,
-    T::Err: std::error::Error + Send + Sync + 'static,
-{
-    match s {
-        Some(&[k, size]) if k == key => Ok(size.parse()?),
-        _ => Err(anyhow!("failed to parse input",)),
-    }
-}
-
-fn parse_gentype(s: &str) -> anyhow::Result<GenType> {
-    let s = s.trim();
-    if s.strip_prefix("static").is_some() {
-        return Ok(GenType::Static);
-    }
-    if let Some(s) = s.strip_prefix("file") {
-        let pos = s
-            .find(' ')
-            .ok_or_else(|| anyhow!("invalid: no <space> found in `{}`", s))?;
-        return Ok(GenType::File(s[pos + 1..].parse()?));
-    }
-    if let Some(s) = s.strip_prefix("randompkt") {
-        let vars = s.rsplit('=').collect::<Vec<_>>();
-        let mut iter = vars.chunks_exact(2);
-        let size = parse_key_val("size", iter.next())
-            .with_context(|| format!("invalid: failed to parse randompkt generator in `{}`", s))?;
-        return Ok(GenType::RandomPkt { size });
-    }
-    if let Some(s) = s.strip_prefix("randomlabel") {
-        let vars = s.rsplit('=').collect::<Vec<_>>();
-        let mut iter = vars.chunks_exact(2);
-        let size = parse_key_val("size", iter.next())
-            .with_context(|| format!("invalid: failed to parse randomlabel in `{}`", s))?;
-        return Ok(GenType::RandomQName { size });
-    }
-
-    Err(anyhow!(
-        "invalid: generator type does not match in `{}`\n 
-    must be one of \"static\" / \"randompkt\" / \"randomqname\"",
-        s
-    ))
+    #[clap(name = "randompkt")]
+    RandomPkt {
+        #[clap(default_value = "600")]
+        size: usize,
+    },
+    #[clap(name = "randomqname")]
+    RandomQName {
+        #[clap(default_value = "62")]
+        size: usize,
+    },
+    File {
+        #[clap(parse(from_os_str))]
+        path: PathBuf,
+    },
 }

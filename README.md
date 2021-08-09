@@ -61,6 +61,7 @@ cargo install
 ### TODO
 
 - throttle based on # of timeouts
+- first batch of messages always seems to be double the set QPS (try `--limit-secs 5 -Q 10` for example, it will end up sending 60 queries)
 - metric collection needs to be more solid, sometimes get a few dropped msgs
 - some TODO cleanups left in the code to address
 - arg parsing for generator is very different from flamethrow because clap doesn't seem to support parsing it in the same style-- would be nice to figure this out

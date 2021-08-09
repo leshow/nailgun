@@ -1,6 +1,7 @@
 use std::{
     io,
     net::SocketAddr,
+    ops::AddAssign,
     pin::Pin,
     sync::{
         atomic::{self},
@@ -62,10 +63,22 @@ impl Generator {
             // Would need to drop this abstraction in order to have tcp gen open/close multiple
             // connections?
             Protocol::Tcp => {
-                TcpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
+                TcpGen::build(
+                    Arc::clone(&store),
+                    Arc::clone(&stats.atomic_store),
+                    self.config.clone(),
+                    bucket,
+                )
+                .await?
             }
             Protocol::Udp => {
-                UdpGen::build(&store, &stats.atomic_store, &self.config, bucket).await?
+                UdpGen::build(
+                    Arc::clone(&store),
+                    Arc::clone(&stats.atomic_store),
+                    self.config.clone(),
+                    bucket,
+                )
+                .await?
             }
         };
         let mut sender = self.sender_task(sender)?;
@@ -135,7 +148,7 @@ impl Generator {
                     // abort sender
                     sender.abort();
                     // wait for remaining in flight messages or timeouts
-                    self.wait_in_flight(&store).await;
+                    self.wait_in_flight(&store, &stats.atomic_store).await;
                     // final log
                     let (_, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
@@ -152,20 +165,27 @@ impl Generator {
         Ok(())
     }
 
-    async fn wait_in_flight(&self, store: &Arc<Mutex<Store>>) {
+    async fn wait_in_flight(&self, store: &Arc<Mutex<Store>>, atomic_store: &Arc<AtomicStore>) {
+        // add a little extra time to timeout any in flight queries
         let timeout = self.config.timeout;
         let mut interval = time::interval(Duration::from_millis(10));
         let start_wait = StdInstant::now();
         loop {
             interval.tick().await;
-            let store = store.lock();
+            let mut store = store.lock();
+            // could rely on cleanup_task?
+            let len = store.clear_timeouts(timeout);
+            atomic_store
+                .timed_out
+                .fetch_add(len as u64, atomic::Ordering::Relaxed);
+
             let empty = store.in_flight.is_empty();
-            drop(store);
             let now = StdInstant::now();
             if empty || (now - start_wait > timeout) {
                 trace!("waited {:?} for cleanup", now - start_wait);
                 return;
             }
+            drop(store);
         }
     }
 
@@ -182,22 +202,10 @@ impl Generator {
             loop {
                 sleep.tick().await;
                 let mut store = store.lock();
-                let now = StdInstant::now();
-                let mut ids = Vec::new();
-                // remove all timed out ids from in_flight
-                store.in_flight.retain(|id, info| {
-                    if now - info.sent >= timeout {
-                        ids.push(*id);
-                        false
-                    } else {
-                        true
-                    }
-                });
+                let len = store.clear_timeouts(timeout);
                 atomic_store
                     .timed_out
-                    .fetch_add(ids.len() as u64, atomic::Ordering::Relaxed);
-                // add back the ids so they can be used
-                store.ids.extend(ids);
+                    .fetch_add(len as u64, atomic::Ordering::Relaxed);
                 drop(store);
             }
         })
@@ -253,9 +261,9 @@ struct UdpGen;
 #[async_trait]
 trait BuildGen {
     async fn build(
-        store: &Arc<Mutex<Store>>,
-        atomic_store: &Arc<AtomicStore>,
-        config: &Config,
+        store: Arc<Mutex<Store>>,
+        atomic_store: Arc<AtomicStore>,
+        config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(
         Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
@@ -268,9 +276,9 @@ type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
 #[async_trait]
 impl BuildGen for TcpGen {
     async fn build(
-        store: &Arc<Mutex<Store>>,
-        atomic_store: &Arc<AtomicStore>,
-        config: &Config,
+        store: Arc<Mutex<Store>>,
+        atomic_store: Arc<AtomicStore>,
+        config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building TCP generator with target {}", config.target);
@@ -283,10 +291,10 @@ impl BuildGen for TcpGen {
             },
         );
         let sender = Sender {
-            config: config.clone(),
             s: MsgSend::Tcp { s },
-            store: Arc::clone(store),
-            atomic_store: Arc::clone(atomic_store),
+            config,
+            store,
+            atomic_store,
             bucket,
         };
         Ok((Box::pin(reader), sender))
@@ -296,9 +304,9 @@ impl BuildGen for TcpGen {
 #[async_trait]
 impl BuildGen for UdpGen {
     async fn build(
-        store: &Arc<Mutex<Store>>,
-        atomic_store: &Arc<AtomicStore>,
-        config: &Config,
+        store: Arc<Mutex<Store>>,
+        atomic_store: Arc<AtomicStore>,
+        config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
@@ -308,13 +316,13 @@ impl BuildGen for UdpGen {
 
         let recv = UdpFramed::new(r, BytesCodec::new());
         let sender = Sender {
-            config: config.clone(),
             s: MsgSend::Udp {
                 s,
                 target: config.target,
             },
-            store: Arc::clone(store),
-            atomic_store: Arc::clone(atomic_store),
+            config,
+            store,
+            atomic_store,
             bucket,
         };
         Ok((Box::pin(recv), sender))

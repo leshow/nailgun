@@ -82,8 +82,8 @@ impl TryFrom<&Args> for Config {
         use trust_dns_resolver::{config::*, Resolver};
 
         let query_src = match &args.generator {
-            GenType::File(path) => Source::File(path.clone()),
-            GenType::Static => Source::Static {
+            Some(GenType::File { path }) => Source::File(path.clone()),
+            Some(GenType::Static) | None => Source::Static {
                 name: Name::from_ascii(&args.record).map_err(|err| {
                     anyhow!(
                         "failed to parse record: {:?}. with error: {:?}",
@@ -94,8 +94,8 @@ impl TryFrom<&Args> for Config {
                 qtype: args.qtype,
                 class: args.class,
             },
-            GenType::RandomPkt { size } => Source::RandomPkt { size: *size },
-            GenType::RandomQName { size } => Source::RandomQName {
+            Some(GenType::RandomPkt { size }) => Source::RandomPkt { size: *size },
+            Some(GenType::RandomQName { size }) => Source::RandomQName {
                 size: *size,
                 qtype: args.qtype,
             },

@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     sync::atomic::{self, AtomicU64},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use rand::{prelude::SliceRandom, thread_rng};
@@ -18,12 +18,31 @@ pub struct Store {
     pub ids: VecDeque<u16>,
     pub in_flight: FxHashMap<u16, QueryInfo>,
 }
+
 impl Store {
     pub fn new() -> Self {
         Self {
             in_flight: FxHashMap::default(),
             ids: create_and_shuffle(),
         }
+    }
+    pub fn clear_timeouts(&mut self, timeout: Duration) -> usize {
+        let now = Instant::now();
+        let mut ids = Vec::new();
+        // remove all timed out ids from in_flight
+        self.in_flight.retain(|id, info| {
+            if now - info.sent >= timeout {
+                ids.push(*id);
+                false
+            } else {
+                true
+            }
+        });
+        let len = ids.len();
+        // add back the ids so they can be used
+        self.ids.extend(ids);
+
+        len
     }
 }
 
