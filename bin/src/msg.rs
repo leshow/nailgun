@@ -4,6 +4,7 @@ use bytes::Bytes;
 use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
 
+#[derive(Clone, Debug)]
 pub struct BufMsg {
     buf: Bytes,
     addr: SocketAddr,

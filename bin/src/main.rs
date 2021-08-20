@@ -34,13 +34,14 @@ mod sender;
 mod shutdown;
 mod stats;
 mod store;
+mod util;
 
 use crate::{
     args::{Args, Family},
     config::Config,
     gen::Generator,
     shutdown::Shutdown,
-    stats::StatsInterval,
+    stats::StatsRunner,
 };
 
 fn main() -> Result<()> {
@@ -142,7 +143,7 @@ impl Runner {
         let mut handles = Vec::with_capacity(len);
 
         let (stats_tx, rx) = mpsc::channel(len);
-        let mut stats = StatsRunner { rx, len };
+        let mut stats = StatsRunner::new(rx, len);
         tokio::spawn(async move { stats.run().await });
 
         for i in 0..len {
@@ -172,32 +173,6 @@ impl Runner {
         for handle in handles {
             handle.await?;
         }
-        Ok(())
-    }
-}
-
-// TODO: do we want this to listen to all generators stats
-// and take care of logging? we could aggregate all the data for
-// each period this way. probably better than letting each generator
-// log separately?
-
-#[derive(Debug)]
-struct StatsRunner {
-    rx: mpsc::Receiver<StatsInterval>,
-    len: usize,
-}
-
-impl StatsRunner {
-    pub async fn run(&mut self) -> Result<()> {
-        let mut summary = StatsInterval::default();
-        let mut n = 0;
-        // recv returns None when all senders are dropped-- exiting
-        while let Some(interval) = self.rx.recv().await {
-            n += 1;
-            trace!("received stats");
-            summary.update_totals(interval, n);
-        }
-        summary.summary()?;
         Ok(())
     }
 }

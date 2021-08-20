@@ -4,8 +4,7 @@ version = "0.1.0"
 authors = ["Evan Cameron <cameron.evan@gmail.com>"]
 edition = "2018"
 description = """
-nailgun small tool written in Rust that supports benchmarking and stress testing DNS servers. It supports IPv4 &
-IPv6, UDP & TCP and can generate different kinds of queries
+nailgun is a small tool written in Rust that supports benchmarking and stress testing DNS servers. It supports IPv4 & IPv6, UDP & TCP and can generate different kinds of queries
 """
 categories = ["command-line-utilities", "asynchronous", "network-programming"]
 keywords = ["dns", "performance", "testing"]
@@ -33,3 +32,4 @@ parking_lot = "0.11.1"
 rustc-hash = "1.1.0"
 rand = "0.8"
 governor = "0.3.2"
+num-traits = "0.2.14"

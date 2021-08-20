@@ -502,6 +502,7 @@ dependencies = [
  "bytes",
  "clap",
  "governor",
+ "num-traits",
  "num_cpus",
  "parking_lot",
  "rand",

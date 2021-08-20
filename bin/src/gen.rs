@@ -109,13 +109,8 @@ impl Generator {
                         store.ids.push_back(id);
                         if let Some(qinfo) = store.in_flight.remove(&id) {
                             // TODO: there is a bug here were if we
-                            // never recv nothing is removed, so there is no
+                            // never recv then nothing is removed, so there is no
                             // sent buf_size
-                            //
-                            // two ideas to make this better & fix a few other things:
-                            // 1 - make a Arc<Mutex<Stats>> and share with all
-                            // generators
-                            // 2 - make a Stats actor and use mpsc chans.
                             stats.update(qinfo, &msg);
                         }
                         drop(store);
@@ -126,7 +121,8 @@ impl Generator {
                     let (now, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
                     interval = now;
-                    stats.log_stats(elapsed, total_duration, in_flight, ids);
+                    // should complete immediately
+                    self.stats_tx.send(stats.interval(elapsed, total_duration, in_flight, ids)).await?;
                     // reset the timer
                     sleep.as_mut().reset(now + Duration::from_secs(1));
                 },
@@ -148,10 +144,10 @@ impl Generator {
                     // final log
                     let (_, elapsed, in_flight, ids) = log(interval);
                     total_duration += elapsed;
-                    stats.log_stats(elapsed, total_duration, in_flight, ids);
+                    self.stats_tx.send(stats.interval(elapsed, total_duration, in_flight, ids)).await?;
                     // abort cleanup
                     cleanup.abort();
-                    self.stats_tx.send(stats.totals()).await?;
+                    // self.stats_tx.send(stats.totals()).await?;
                     return Ok(());
                 }
             }
