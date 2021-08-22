@@ -9,7 +9,7 @@ use std::{
 use anyhow::Result;
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
-use tracing::{info, trace};
+use tracing::info;
 use trust_dns_proto::op::ResponseCode;
 
 use crate::{
