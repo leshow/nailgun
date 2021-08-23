@@ -9,8 +9,8 @@ use anyhow::Result;
 use rand::Rng;
 use tracing::error;
 use trust_dns_proto::{
-    op::{Message, MessageType, Query},
-    rr::{DNSClass, Name, RecordType},
+    op::{Edns, Message, MessageType, Query},
+    rr::{rdata::opt::EdnsCode, DNSClass, Name, RecordType},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -64,7 +64,9 @@ impl QueryGen for FileGen {
         let mut msg = Message::new();
         msg.set_id(id)
             .add_query(Query::query(name, qtype))
-            .set_message_type(MessageType::Query);
+            .set_message_type(MessageType::Query)
+            .set_recursion_desired(true)
+            .set_edns(Edns::new());
 
         match msg.to_vec() {
             Ok(msg) => Some(msg),
@@ -93,7 +95,9 @@ impl QueryGen for StaticGen {
         }
         msg.set_id(id)
             .add_query(query)
-            .set_message_type(MessageType::Query);
+            .set_message_type(MessageType::Query)
+            .set_recursion_desired(true)
+            .set_edns(Edns::new());
         match msg.to_vec() {
             Ok(msg) => Some(msg),
             Err(err) => {
@@ -159,7 +163,10 @@ impl QueryGen for RandomQName {
         let mut msg = Message::new();
         msg.set_id(id)
             .add_query(Query::query(qname, self.qtype))
-            .set_message_type(MessageType::Query);
+            .set_message_type(MessageType::Query)
+            .set_recursion_desired(true)
+            .set_edns(Edns::new());
+
         match msg.to_vec() {
             Ok(msg) => Some(msg),
             Err(err) => {

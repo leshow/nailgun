@@ -42,6 +42,8 @@ nailgun 0.0.0.0 -p 1953 -w 16 -t 1
 
 Will spawn 16 OS threads (`w`/`wcount`) on the tokio runtime and 1 traffic generator (`t`/`tcount`) per thread spawned, for a total of 16\*1 = 16 traffic generators.
 
+**Note** If you want a quick server to test against, I've been spinning up `dnsdist` and adding `addAction(AllRule(), RCodeAction(3))` to its config so that all DNS messages immediately return with `NXDomain`.
+
 ### Building & Installing
 
 To build locally:
