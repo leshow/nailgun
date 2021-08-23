@@ -2,7 +2,7 @@
 
 `nailgun` is a DNS performance testing client written in Rust using `trust-dns-proto` and `tokio`. Open to PRs, issues, comments!
 
-`nailgun` is written as a hobby project first and foremost, it's inspired by flamethrower and copies some of its arguments. It is single-threaded by default but configurable to use many threads. You can specify both the number of traffic generators (with `tcount`) and the number of tokio worker threads (with `wcount`), `nailgun` will start `tcount * wcount` generators. Most of the time, this is not necessary as it is quite fast with 1 concurrent generator and a single worker thread for the tokio runtime is more than enough. Testing against a local `dnsdist` instance configured to return instantly with `NXDOMAIN`, (yes, not a real-world benchmark) `nailgun` can do well over 250K QPS (1 worker thread & generator).
+`nailgun` is written as a hobby project first and foremost, it's inspired by flamethrower and copies some of its arguments. It is single-threaded by default but configurable to use many threads. You can specify both the number of traffic generators (with `tcount`) and the number of tokio worker threads (with `wcount`), `nailgun` will start `tcount * wcount` generators. Most of the time, this is not necessary as 1 concurrent generator and a single worker thread is more than enough. Testing against a local `dnsdist` instance configured to return instantly with `NXDOMAIN`, (yes, not a real-world benchmark) `nailgun` can do well over 250K QPS (1 worker thread & generator).
 
 `nailgun` uses `tracing` for logging so `RUST_LOG` can be used in order to control the logging output.
 
