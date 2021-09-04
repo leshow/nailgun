@@ -78,7 +78,7 @@ impl StatsTracker {
         elapsed: Duration,
         total_duration: Duration,
         in_flight: usize,
-        ids: usize,
+        ids_len: usize,
     ) -> StatsInterval {
         let timeouts = self.atomic_store.timed_out.load(atomic::Ordering::Relaxed);
         let sent = self.atomic_store.sent.load(atomic::Ordering::Relaxed);
@@ -324,11 +324,11 @@ impl StatsTotals {
         if interval.avg_latency() != 0. {
             self.avg_latency.next(interval.avg_latency());
         }
-        if interval.buf_size != 0 {
+        if interval.buf_size != 0 && interval.sent != 0 {
             let avg = interval.buf_size / interval.sent as usize;
             self.avg_buf_size.next(avg);
         }
-        if interval.recv_buf_size != 0 {
+        if interval.recv_buf_size != 0 && interval.ok_recv != 0 {
             let avg = interval.recv_buf_size / interval.ok_recv as usize;
             self.avg_recv_buf_size.next(avg);
         }
