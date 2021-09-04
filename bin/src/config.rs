@@ -65,6 +65,7 @@ pub enum Qps {
 
 impl Qps {
     /// Returns `true` if the qps is [`Unlimited`].
+    #[allow(dead_code)]
     pub fn is_unlimited(&self) -> bool {
         !self.is_limited()
     }

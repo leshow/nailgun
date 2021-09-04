@@ -22,6 +22,7 @@ impl BufMsg {
     }
 
     /// Get associated address
+    #[allow(dead_code)]
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }

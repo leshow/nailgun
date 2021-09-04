@@ -199,18 +199,18 @@ impl Generator {
         // TODO: can we reduce the code duplication here without using
         // dynamic types?
         Ok(match &self.config.query_src {
-            Source::File(p) => {
-                trace!("using file gen on path {:#?}", p);
-                let query_gen = FileGen::new(p)?;
+            Source::File(path) => {
+                trace!(path = %path.display(), "using file gen");
+                let query_gen = FileGen::new(path)?;
 
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
-                        error!(?err, "Error in send task");
+                        error!(?err, "error in send task");
                     }
                 })
             }
             Source::Static { name, qtype, class } => {
-                trace!("using static gen with {} {:?} {}", name, qtype, class);
+                trace!(%name, ?qtype, %class, "using static gen",);
                 let query_gen = StaticGen::new(name.clone(), *qtype, *class);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
@@ -219,7 +219,7 @@ impl Generator {
                 })
             }
             Source::RandomPkt { size } => {
-                trace!("using randompkt gen with len {}", *size);
+                trace!(size, "using randompkt gen");
                 let query_gen = RandomPkt::new(*size);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
@@ -228,7 +228,7 @@ impl Generator {
                 })
             }
             Source::RandomQName { size, qtype } => {
-                trace!("using randomqname gen with len {} {:?}", *size, qtype);
+                trace!(size, ?qtype, "using randomqname gen");
                 let query_gen = RandomQName::new(*qtype, *size);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {

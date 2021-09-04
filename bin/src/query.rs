@@ -10,7 +10,7 @@ use rand::Rng;
 use tracing::error;
 use trust_dns_proto::{
     op::{Edns, Message, MessageType, Query},
-    rr::{rdata::opt::EdnsCode, DNSClass, Name, RecordType},
+    rr::{DNSClass, Name, RecordType},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

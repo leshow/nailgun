@@ -78,7 +78,8 @@ impl StatsTracker {
         elapsed: Duration,
         total_duration: Duration,
         in_flight: usize,
-        ids_len: usize,
+        // not currently used, but we could log how many available ids there are
+        _ids_len: usize,
     ) -> StatsInterval {
         let timeouts = self.atomic_store.timed_out.load(atomic::Ordering::Relaxed);
         let sent = self.atomic_store.sent.load(atomic::Ordering::Relaxed);
