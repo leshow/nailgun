@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::Result;
 use async_trait::async_trait;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -26,14 +26,14 @@ use tokio_util::{
     codec::{BytesCodec, FramedRead},
     udp::UdpFramed,
 };
-use tracing::{error, trace};
+use tracing::{error, info, trace};
 
 use crate::{
     args::Protocol,
     config::Config,
     msg::{BufMsg, TcpDecoder},
     query::{FileGen, RandomPkt, RandomQName, Source, StaticGen},
-    sender::{MsgSend, Sender},
+    sender::{DohSender, MsgSend, Sender},
     shutdown::Shutdown,
     stats::{StatsInterval, StatsTracker},
     store::{AtomicStore, Store},
@@ -200,7 +200,7 @@ impl Generator {
         // dynamic types?
         Ok(match &self.config.query_src {
             Source::File(path) => {
-                trace!(path = %path.display(), "using file gen");
+                info!(path = %path.display(), "using file gen");
                 let query_gen = FileGen::new(path)?;
 
                 tokio::spawn(async move {
@@ -210,7 +210,7 @@ impl Generator {
                 })
             }
             Source::Static { name, qtype, class } => {
-                trace!(%name, ?qtype, %class, "using static gen",);
+                info!(%name, ?qtype, %class, "using static gen",);
                 let query_gen = StaticGen::new(name.clone(), *qtype, *class);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
@@ -219,7 +219,7 @@ impl Generator {
                 })
             }
             Source::RandomPkt { size } => {
-                trace!(size, "using randompkt gen");
+                info!(size, "using randompkt gen");
                 let query_gen = RandomPkt::new(*size);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
@@ -228,7 +228,7 @@ impl Generator {
                 })
             }
             Source::RandomQName { size, qtype } => {
-                trace!(size, ?qtype, "using randomqname gen");
+                info!(size, ?qtype, "using randomqname gen");
                 let query_gen = RandomQName::new(*qtype, *size);
                 tokio::spawn(async move {
                     if let Err(err) = sender.run(query_gen).await {
@@ -242,6 +242,7 @@ impl Generator {
 
 struct TcpGen;
 struct UdpGen;
+struct DohGen;
 
 #[async_trait]
 trait BuildGen {
@@ -250,10 +251,7 @@ trait BuildGen {
         atomic_store: Arc<AtomicStore>,
         config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(
-        Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
-        Sender,
-    )>;
+    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)>;
 }
 
 type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
@@ -311,5 +309,31 @@ impl BuildGen for UdpGen {
             bucket,
         };
         Ok((Box::pin(recv), sender))
+    }
+}
+
+#[async_trait]
+impl BuildGen for DohGen {
+    async fn build(
+        store: Arc<Mutex<Store>>,
+        atomic_store: Arc<AtomicStore>,
+        config: Config,
+        bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
+    ) -> Result<(
+        Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
+        Sender,
+    )> {
+        let (doh, tx, resp_rx) = DohSender::new(config.target).await;
+        let sender = Sender {
+            s: MsgSend::Doh { s: tx },
+            config,
+            store,
+            atomic_store,
+            bucket,
+        };
+
+        // use async_stream here potentially?
+        // Box::pin(async_stream! { while let Some(bytes) = resp_rx.recv().await { yield bytes; } })
+        Ok((todo!(), sender))
     }
 }

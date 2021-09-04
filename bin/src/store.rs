@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::{prelude::SliceRandom, thread_rng};
+use rand::prelude::SliceRandom;
 use rustc_hash::FxHashMap;
 
 #[derive(Debug)]
@@ -66,6 +66,6 @@ impl AtomicStore {
 // create a stack array of random u16's
 fn create_and_shuffle() -> VecDeque<u16> {
     let mut data: Vec<u16> = (0..u16::max_value()).collect();
-    data.shuffle(&mut thread_rng());
+    data.shuffle(&mut rand::thread_rng());
     VecDeque::from(data)
 }
