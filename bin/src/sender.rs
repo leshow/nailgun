@@ -1,4 +1,5 @@
 use std::{
+    io,
     net::SocketAddr,
     sync::{atomic, Arc},
     time::Instant,
@@ -119,7 +120,8 @@ impl MsgSend {
 pub struct DohSender {
     rx: mpsc::Receiver<Message>,
     stream: HttpsClientStream,
-    resp_tx: mpsc::Sender<(Bytes, SocketAddr)>,
+    addr: SocketAddr,
+    resp_tx: mpsc::Sender<io::Result<(BytesMut, SocketAddr)>>,
 }
 
 impl DohSender {
@@ -128,7 +130,7 @@ impl DohSender {
     ) -> (
         Self,
         mpsc::Sender<Message>,
-        mpsc::Receiver<(Bytes, SocketAddr)>,
+        mpsc::Receiver<io::Result<(BytesMut, SocketAddr)>>,
     ) {
         let (tx, rx) = mpsc::channel(100_000);
         let (resp_tx, resp_rx) = mpsc::channel(100_000);
@@ -137,6 +139,7 @@ impl DohSender {
                 rx,
                 resp_tx,
                 stream: todo!(),
+                addr: todo!(),
             },
             tx,
             resp_rx,
@@ -144,17 +147,22 @@ impl DohSender {
     }
     pub async fn run(&mut self) -> Result<()> {
         while let Some(msg) = self.rx.recv().await {
-            let req = DnsRequest::new(todo!(), Default::default());
+            let req = DnsRequest::new(msg, Default::default());
             let stream = self.stream.send_message(req);
             let tx = self.resp_tx.clone();
+            // TODO: shutdown?
+            let addr = self.addr;
             tokio::spawn(async move {
                 let resp = stream.first_answer().await;
                 // TODO: unfortunately (for us) trustdns is deserializing the message
                 // so we have to convert it back to a vec in order to use it..
                 if let Ok(resp) = resp {
-                    // tx.send(resp).await?;
-                    todo!();
+                    let bytes = BytesMut::from(&resp.to_vec()?[..]);
+                    tx.send(Ok((bytes, addr)))
+                        .await
+                        .context("failed to send DOH response to gen")?;
                 }
+                Ok::<_, anyhow::Error>(())
             });
         }
         Ok(())
