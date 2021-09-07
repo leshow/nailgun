@@ -21,7 +21,7 @@ use tokio::{
     task::JoinHandle,
     time::{self, Instant},
 };
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tokio_util::{
     codec::{BytesCodec, FramedRead},
     udp::UdpFramed,
@@ -332,8 +332,6 @@ impl BuildGen for DohGen {
             bucket,
         };
 
-        // use async_stream here potentially?
-        // Box::pin(async_stream! { while let Some(bytes) = resp_rx.recv().await { yield bytes; } })
-        Ok((todo!(), sender))
+        Ok((Box::pin(ReceiverStream::new(resp_rx)), sender))
     }
 }
