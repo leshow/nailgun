@@ -30,7 +30,6 @@ use webpki::DNSNameRef;
 
 use crate::error::ProtoError;
 use crate::iocompat::AsyncIoStdAsTokio;
-use crate::op::Message;
 use crate::tcp::Connect;
 use crate::xfer::{DnsRequest, DnsRequestSender, DnsResponse, DnsResponseStream, SerialMessage};
 
@@ -62,7 +61,6 @@ impl HttpsClientStream {
         h2: SendRequest<Bytes>,
         message: Bytes,
         name_server_name: Arc<str>,
-        name_server: SocketAddr,
     ) -> Result<BytesMut, ProtoError> {
         let mut h2 = match h2.ready().await {
             Ok(h2) => h2,
@@ -180,11 +178,8 @@ impl HttpsClientStream {
         h2: SendRequest<Bytes>,
         message: Bytes,
         name_server_name: Arc<str>,
-        name_server: SocketAddr,
-    ) -> Result<DnsResponse<BytesMut>, ProtoError> {
-        Ok(DnsResponse::new(
-            Self::inner_send_bytes(h2, message, name_server_name, name_server).await?,
-        ))
+    ) -> Result<BytesMut, ProtoError> {
+        Ok(Self::inner_send_bytes(h2, message, name_server_name).await?)
     }
 
     async fn inner_send(
@@ -192,15 +187,15 @@ impl HttpsClientStream {
         message: Bytes,
         name_server_name: Arc<str>,
         name_server: SocketAddr,
-    ) -> Result<DnsResponse<Message>, ProtoError> {
-        let bytes = Self::inner_send_bytes(h2, message, name_server_name, name_server).await?;
+    ) -> Result<DnsResponse, ProtoError> {
+        let bytes = Self::inner_send_bytes(h2, message, name_server_name).await?;
 
         // and finally convert the bytes into a DNS message
         let message = SerialMessage::new(bytes.to_vec(), name_server).to_message()?;
         Ok(message.into())
     }
     /// send a DnsRequest but don't decode the received message, only return the raw bytes
-    pub fn send_bytes(&mut self, mut message: Vec<u8>) -> DnsResponseStream<BytesMut> {
+    pub fn send_bytes(&mut self, message: Vec<u8>) -> DnsResponseStream<BytesMut> {
         if self.is_shutdown {
             panic!("can not send messages after stream is shutdown")
         }
@@ -217,7 +212,6 @@ impl HttpsClientStream {
             self.h2.clone(),
             Bytes::from(message),
             Arc::clone(&self.name_server_name),
-            self.name_server,
         ))
         .into()
     }
@@ -275,7 +269,7 @@ impl DnsRequestSender for HttpsClientStream {
     ///    (Unsupported Media Type) upon receiving a media type it is unable to
     ///    process.
     /// ```
-    fn send_message(&mut self, mut message: DnsRequest) -> DnsResponseStream<Message> {
+    fn send_message(&mut self, mut message: DnsRequest) -> DnsResponseStream {
         if self.is_shutdown {
             panic!("can not send messages after stream is shutdown")
         }
@@ -551,12 +545,10 @@ where
 }
 
 /// A future that resolves to
-pub struct HttpsClientResponse<T>(
-    Pin<Box<dyn Future<Output = Result<DnsResponse<T>, ProtoError>> + Send>>,
-);
+pub struct HttpsClientResponse<T>(Pin<Box<dyn Future<Output = Result<T, ProtoError>> + Send>>);
 
 impl<T> Future for HttpsClientResponse<T> {
-    type Output = Result<DnsResponse<T>, ProtoError>;
+    type Output = Result<T, ProtoError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.as_mut().poll(cx).map_err(ProtoError::from)

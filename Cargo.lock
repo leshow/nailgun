@@ -674,6 +674,7 @@ dependencies = [
  "parking_lot",
  "rand",
  "rustc-hash",
+ "rustls",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -683,6 +684,7 @@ dependencies = [
  "tracing-subscriber",
  "trust-dns-proto 0.21.0-alpha.2",
  "trust-dns-resolver",
+ "webpki-roots",
 ]
 
 [[package]]

@@ -23,8 +23,7 @@ use crate::args::{Args, LogStructure};
 
 pub fn setup(args: &Args) -> Result<Option<WorkerGuard>> {
     let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("info"))
-        .unwrap()
+        .or_else(|_| EnvFilter::try_new("info"))?
         .add_directive("tokio_util=off".parse()?);
     let registry = tracing_subscriber::registry().with(filter_layer);
 

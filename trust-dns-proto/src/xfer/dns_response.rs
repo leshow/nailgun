@@ -23,10 +23,10 @@ use crate::rr::rdata::SOA;
 use crate::rr::RecordType;
 
 /// A stream returning DNS responses
-pub struct DnsResponseStream<T>(DnsResponseStreamInner<T>);
+pub struct DnsResponseStream<T = DnsResponse>(DnsResponseStreamInner<T>);
 
 impl<T> Stream for DnsResponseStream<T> {
-    type Item = Result<DnsResponse<T>, ProtoError>;
+    type Item = Result<T, ProtoError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         use DnsResponseStreamInner::*;
@@ -55,8 +55,8 @@ impl<T> From<TimeoutFuture<T>> for DnsResponseStream<T> {
     }
 }
 
-impl<T> From<mpsc::Receiver<ProtoResult<DnsResponse<T>>>> for DnsResponseStream<T> {
-    fn from(receiver: mpsc::Receiver<ProtoResult<DnsResponse<T>>>) -> Self {
+impl<T> From<mpsc::Receiver<ProtoResult<T>>> for DnsResponseStream<T> {
+    fn from(receiver: mpsc::Receiver<ProtoResult<T>>) -> Self {
         DnsResponseStream(DnsResponseStreamInner::Receiver(receiver))
     }
 }
@@ -69,27 +69,24 @@ impl<T> From<ProtoError> for DnsResponseStream<T> {
 
 impl<F, T> From<Pin<Box<F>>> for DnsResponseStream<T>
 where
-    F: Future<Output = Result<DnsResponse<T>, ProtoError>> + Send + 'static,
+    F: Future<Output = Result<T, ProtoError>> + Send + 'static,
 {
     fn from(f: Pin<Box<F>>) -> Self {
         DnsResponseStream(DnsResponseStreamInner::Boxed(
-            f as Pin<Box<dyn Future<Output = Result<DnsResponse<T>, ProtoError>> + Send>>,
+            f as Pin<Box<dyn Future<Output = Result<T, ProtoError>> + Send>>,
         ))
     }
 }
 
 enum DnsResponseStreamInner<T> {
     Timeout(TimeoutFuture<T>),
-    Receiver(mpsc::Receiver<ProtoResult<DnsResponse<T>>>),
+    Receiver(mpsc::Receiver<ProtoResult<T>>),
     Error(Option<ProtoError>),
-    Boxed(Pin<Box<dyn Future<Output = Result<DnsResponse<T>, ProtoError>> + Send>>),
+    Boxed(Pin<Box<dyn Future<Output = Result<T, ProtoError>> + Send>>),
 }
 
-type TimeoutFuture<T> = Pin<
-    Box<
-        dyn Future<Output = Result<Result<DnsResponse<T>, ProtoError>, io::Error>> + Send + 'static,
-    >,
->;
+type TimeoutFuture<T> =
+    Pin<Box<dyn Future<Output = Result<Result<T, ProtoError>, io::Error>> + Send + 'static>>;
 
 // TODO: this needs to have the IP addr of the remote system...
 // TODO: see https://github.com/bluejekyll/trust-dns/issues/383 for removing vec of messages and instead returning a Stream
@@ -97,16 +94,10 @@ type TimeoutFuture<T> = Pin<
 ///
 /// For Most DNS requests, only one response is expected, the exception is a multicast request.
 #[derive(Clone, Debug)]
-pub struct DnsResponse<T>(T);
-
-impl<T> DnsResponse<T> {
-    pub fn new(msg: T) -> Self {
-        Self(msg)
-    }
-}
+pub struct DnsResponse(Message);
 
 // TODO: when `impl Trait` lands in stable, remove this, and expose FlatMap over answers, et al.
-impl DnsResponse<Message> {
+impl DnsResponse {
     /// Retrieves the SOA from the response. This will only exist if it was an authoritative response.
     pub fn soa(&self) -> Option<SOA> {
         self.name_servers()
@@ -254,28 +245,28 @@ impl DnsResponse<Message> {
     }
 }
 
-impl<T> Deref for DnsResponse<T> {
-    type Target = T;
+impl Deref for DnsResponse {
+    type Target = Message;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<T> DerefMut for DnsResponse<T> {
+impl DerefMut for DnsResponse {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl From<DnsResponse<Message>> for Message {
-    fn from(response: DnsResponse<Message>) -> Message {
+impl From<DnsResponse> for Message {
+    fn from(response: DnsResponse) -> Message {
         response.0
     }
 }
 
-impl<T> From<T> for DnsResponse<T> {
-    fn from(message: T) -> DnsResponse<T> {
+impl From<Message> for DnsResponse {
+    fn from(message: Message) -> Self {
         DnsResponse(message)
     }
 }

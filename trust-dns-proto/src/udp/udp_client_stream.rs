@@ -19,7 +19,7 @@ use log::{debug, warn};
 
 use crate::error::ProtoError;
 use crate::op::message::NoopMessageFinalizer;
-use crate::op::{Message, MessageFinalizer, MessageVerifier};
+use crate::op::{MessageFinalizer, MessageVerifier};
 use crate::udp::udp_stream::{NextRandomUdpSocket, UdpSocket};
 use crate::xfer::{DnsRequest, DnsRequestSender, DnsResponse, DnsResponseStream, SerialMessage};
 use crate::Time;
@@ -107,7 +107,7 @@ fn random_query_id() -> u16 {
 impl<S: UdpSocket + Send + 'static, MF: MessageFinalizer> DnsRequestSender
     for UdpClientStream<S, MF>
 {
-    fn send_message(&mut self, mut message: DnsRequest) -> DnsResponseStream<Message> {
+    fn send_message(&mut self, mut message: DnsRequest) -> DnsResponseStream {
         if self.is_shutdown {
             panic!("can not send messages after stream is shutdown")
         }
@@ -147,9 +147,7 @@ impl<S: UdpSocket + Send + 'static, MF: MessageFinalizer> DnsRequestSender
         let message_id = message.id();
         let message = SerialMessage::new(bytes, self.name_server);
 
-        S::Time::timeout::<
-            Pin<Box<dyn Future<Output = Result<DnsResponse<Message>, ProtoError>> + Send>>,
-        >(
+        S::Time::timeout::<Pin<Box<dyn Future<Output = Result<DnsResponse, ProtoError>> + Send>>>(
             self.timeout,
             Box::pin(send_serial_message::<S>(message, message_id, verifier)),
         )
@@ -213,7 +211,7 @@ async fn send_serial_message<S: UdpSocket + Send>(
     msg: SerialMessage,
     msg_id: u16,
     verifier: Option<MessageVerifier>,
-) -> Result<DnsResponse<Message>, ProtoError> {
+) -> Result<DnsResponse, ProtoError> {
     let name_server = msg.addr();
     let socket: S = NextRandomUdpSocket::new(&name_server).await?;
     let bytes = msg.bytes();
