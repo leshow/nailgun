@@ -149,10 +149,12 @@ impl Runner {
         let (stats_tx, rx) = mpsc::channel(len);
         let mut stats = StatsRunner::new(rx, len);
         tokio::spawn(async move { stats.run().await });
+        let config = self.args.to_config().await?;
+        trace!(?config);
 
         for i in 0..len {
             let mut gen = Generator {
-                config: self.args.to_config().await?,
+                config: config.clone(),
                 // Receive shutdown notifications.
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
                 // Notifies the receiver half once all clones are
