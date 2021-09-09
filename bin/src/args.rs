@@ -1,8 +1,10 @@
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use clap::Clap;
-use trust_dns_proto::rr::{DNSClass, RecordType};
+use trust_dns_proto::rr::{DNSClass, Name, RecordType};
 
-use std::{net::IpAddr, path::PathBuf, str::FromStr};
+use std::{net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
+
+use crate::{config::Config, query::Source};
 
 /// nailgun is a cli tool for stress testing and benchmarking DNS
 #[derive(Debug, Clap, Clone, PartialEq, Eq)]
@@ -147,4 +149,62 @@ pub enum GenType {
         #[clap(parse(from_os_str))]
         path: PathBuf,
     },
+}
+
+impl Args {
+    pub async fn to_config(&self) -> Result<Config> {
+        use trust_dns_resolver::{config::*, TokioAsyncResolver};
+
+        let query_src = match &self.generator {
+            Some(GenType::File { path }) => Source::File(path.clone()),
+            Some(GenType::Static) | None => Source::Static {
+                name: Name::from_ascii(&self.record).map_err(|err| {
+                    anyhow!(
+                        "failed to parse record: {:?}. with error: {:?}",
+                        self.record,
+                        err
+                    )
+                })?,
+                qtype: self.qtype,
+                class: self.class,
+            },
+            Some(GenType::RandomPkt { size }) => Source::RandomPkt { size: *size },
+            Some(GenType::RandomQName { size }) => Source::RandomQName {
+                size: *size,
+                qtype: self.qtype,
+            },
+        };
+
+        let (target, name_server) = match self.target.parse::<IpAddr>() {
+            #[cfg(feature = "doh")]
+            Ok(target) if self.protocol == self::Protocol::DoH => {
+                bail!("found {}: need to use a domain name for DoH", target)
+            }
+            Ok(target) => (target, None),
+            Err(_) => {
+                // is not an IP, so see if we can resolve it over dns
+                let resolver =
+                    TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())?;
+                let response = resolver.lookup_ip(self.target.clone()).await?;
+
+                (
+                    response
+                        .iter()
+                        .next()
+                        .context("Resolver failed to return an addr")?,
+                    Some(self.target.clone()),
+                )
+            }
+        };
+        Ok(Config {
+            target: (target, self.port).into(),
+            name_server,
+            protocol: self.protocol,
+            bind: self.bind_ip.context("Args::ip always has a value")?,
+            query_src,
+            qps: self.qps,
+            timeout: Duration::from_secs(self.timeout),
+            generators: self.tcount * self.wcount,
+        })
+    }
 }

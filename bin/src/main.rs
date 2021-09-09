@@ -9,7 +9,6 @@
 #![allow(clippy::cognitive_complexity)]
 
 use std::{
-    convert::TryFrom,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     time::Duration,
 };
@@ -38,7 +37,6 @@ mod util;
 
 use crate::{
     args::{Args, Family},
-    config::Config,
     gen::Generator,
     shutdown::Shutdown,
     stats::StatsRunner,
@@ -154,7 +152,7 @@ impl Runner {
 
         for i in 0..len {
             let mut gen = Generator {
-                config: Config::try_from(&self.args)?,
+                config: self.args.to_config().await?,
                 // Receive shutdown notifications.
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
                 // Notifies the receiver half once all clones are
