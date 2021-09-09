@@ -20,7 +20,7 @@ use futures_util::stream::{Stream, TryStreamExt};
 use log::{debug, trace};
 
 use crate::error::*;
-use crate::op::{OpCode, Query, Message};
+use crate::op::{OpCode, Query};
 use crate::rr::dnssec::rdata::{DNSSECRData, DNSKEY, SIG};
 #[cfg(feature = "dnssec")]
 use crate::rr::dnssec::Verifier;
@@ -105,7 +105,7 @@ impl<H> DnsHandle for DnssecDnsHandle<H>
 where
     H: DnsHandle + Sync + Unpin,
 {
-    type Response = Pin<Box<dyn Stream<Item = Result<DnsResponse<Message>, Self::Error>> + Send>>;
+    type Response = Pin<Box<dyn Stream<Item = Result<DnsResponse, Self::Error>> + Send>>;
     type Error = <H as DnsHandle>::Error;
 
     fn is_verifying_dnssec(&self) -> bool {
@@ -178,7 +178,7 @@ where
                         );
                         verify_rrsets(handle.clone(), message_response, dns_class)
                     })
-                    .and_then(move |verified_message: DnsResponse<Message>| {
+                    .and_then(move |verified_message: DnsResponse| {
                         // at this point all of the message is verified.
                         //  This is where NSEC (and possibly NSEC3) validation occurs
                         // As of now, only NSEC is supported.
@@ -226,9 +226,9 @@ where
 #[allow(clippy::type_complexity)]
 async fn verify_rrsets<H, E>(
     handle: DnssecDnsHandle<H>,
-    message_result: DnsResponse<Message>,
+    message_result: DnsResponse,
     dns_class: DNSClass,
-) -> Result<DnsResponse<Message>, E>
+) -> Result<DnsResponse, E>
 where
     H: DnsHandle<Error = E> + Sync + Unpin,
     E: From<ProtoError> + Error + Clone + Send + Unpin + 'static,
@@ -325,9 +325,9 @@ fn is_dnssec(rr: &Record, dnssec_type: RecordType) -> bool {
 }
 
 async fn verify_all_rrsets<F, E>(
-    message_result: DnsResponse<Message>,
+    message_result: DnsResponse,
     rrsets: Vec<F>,
-) -> Result<DnsResponse<Message>, E>
+) -> Result<DnsResponse, E>
 where
     F: Future<Output = Result<Rrset, E>> + Send + Unpin,
     E: From<ProtoError> + Error + Clone + Send + Unpin + 'static,

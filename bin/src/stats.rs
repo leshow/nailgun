@@ -386,7 +386,8 @@ struct PrettyDuration(Duration);
 
 impl Display for PrettyDuration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}s", &self.0.as_secs_f32().to_string()[0..=4])
+        let secs = self.0.as_secs_f32().to_string();
+        write!(f, "{}s", &secs[0..secs.len().min(5)])
     }
 }
 

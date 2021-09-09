@@ -17,7 +17,6 @@ use futures_util::stream::{Peekable, Stream, StreamExt};
 use log::{debug, warn};
 
 use crate::error::*;
-use crate::op::Message;
 use crate::xfer::dns_handle::DnsHandle;
 use crate::xfer::DnsResponseReceiver;
 use crate::xfer::{
@@ -109,12 +108,12 @@ impl DnsHandle for DnsExchange {
 /// A Stream that will resolve to Responses after sending the request
 #[must_use = "futures do nothing unless polled"]
 pub struct DnsExchangeSend {
-    result: DnsResponseReceiver<Message>,
+    result: DnsResponseReceiver<DnsResponse>,
     _sender: BufDnsRequestStreamHandle,
 }
 
 impl Stream for DnsExchangeSend {
-    type Item = Result<DnsResponse<Message>, ProtoError>;
+    type Item = Result<DnsResponse, ProtoError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // as long as there is no result, poll the exchange

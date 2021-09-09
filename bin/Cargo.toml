@@ -13,6 +13,10 @@ license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["doh"]
+doh = ["trust-dns-proto/dns-over-https-rustls", "rustls", "webpki-roots"]
+
 [dependencies]
 async-trait = "0.1.51"
 anyhow = "1.0"
@@ -22,7 +26,7 @@ num_cpus = "1.13.0"
 tokio = { version = "1.11", features = ["full"] }
 tokio-util = { version = "0.6.8", features = ["full"] }
 tokio-stream = "0.1.7"
-trust-dns-proto = { path = "../trust-dns-proto", features = ["dns-over-https-rustls"] }
+trust-dns-proto = { path = "../trust-dns-proto" }
 trust-dns-resolver = { version = "0.21.0-alpha.2" }
 tracing = "0.1.26"
 tracing-subscriber = "0.2.20"
@@ -30,6 +34,8 @@ tracing-appender = "0.1.2"
 tracing-futures = "0.2.5"
 parking_lot = "0.11.2"
 rustc-hash = "1.1.0"
+rustls = { version = "0.19", optional = true }
 rand = "0.8"
 governor = "0.3.2"
 num-traits = "0.2.14"
+webpki-roots = { version = "0.21.0", optional = true }

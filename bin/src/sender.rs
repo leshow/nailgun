@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use bytes::{Bytes, BytesMut};
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -18,12 +17,6 @@ use tokio::{
     net::{tcp::OwnedWriteHalf, UdpSocket},
     sync::mpsc,
     task,
-};
-use trust_dns_proto::{
-    error::ProtoError,
-    https::HttpsClientStream,
-    op::Message,
-    xfer::{DnsRequest, DnsRequestSender, DnsResponse, FirstAnswer},
 };
 
 use crate::{
@@ -75,7 +68,7 @@ impl Sender {
                 }
                 // could be done with an async trait and Sender<S: MsgSender>
                 // but this just seems easier for now
-                self.s.send(&msg[..]).await?;
+                self.s.send(msg).await?;
                 self.atomic_store
                     .sent
                     .fetch_add(1, atomic::Ordering::Relaxed);
@@ -94,77 +87,107 @@ pub enum MsgSend {
         target: SocketAddr,
     },
     Doh {
-        s: mpsc::Sender<Message>,
+        s: mpsc::Sender<Vec<u8>>,
     },
 }
 
 impl MsgSend {
-    async fn send(&mut self, msg: &[u8]) -> Result<()> {
+    async fn send(&mut self, msg: Vec<u8>) -> Result<()> {
         match self {
             MsgSend::Tcp { s } => {
                 // write the message out
                 s.write_u16(msg.len() as u16).await?;
-                s.write_all(msg).await?;
+                s.write_all(&msg[..]).await?;
             }
             MsgSend::Udp { s, target } => {
-                s.send_to(msg, *target).await?;
+                s.send_to(&msg[..], *target).await?;
             }
             MsgSend::Doh { s } => {
-                s.send(todo!()).await?;
+                s.send(msg).await?;
             }
         }
         Ok(())
     }
 }
 
-pub struct DohSender {
-    rx: mpsc::Receiver<Message>,
-    stream: HttpsClientStream,
-    addr: SocketAddr,
-    resp_tx: mpsc::Sender<io::Result<(BytesMut, SocketAddr)>>,
-}
+#[cfg(feature = "doh")]
+pub mod doh {
+    use super::*;
 
-impl DohSender {
-    pub async fn new(
-        target: SocketAddr,
-    ) -> (
-        Self,
-        mpsc::Sender<Message>,
-        mpsc::Receiver<io::Result<(BytesMut, SocketAddr)>>,
-    ) {
-        let (tx, rx) = mpsc::channel(100_000);
-        let (resp_tx, resp_rx) = mpsc::channel(100_000);
-        (
-            Self {
-                rx,
-                resp_tx,
-                stream: todo!(),
-                addr: todo!(),
-            },
-            tx,
-            resp_rx,
-        )
+    use bytes::BytesMut;
+    use rustls::{ClientConfig, KeyLogFile, ProtocolVersion, RootCertStore};
+    use tokio::net::TcpStream as TokioTcpStream;
+    use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
+    use trust_dns_proto::{
+        https::{HttpsClientStream, HttpsClientStreamBuilder},
+        xfer::FirstAnswer,
+    };
+
+    pub struct DohSender {
+        rx: mpsc::Receiver<Vec<u8>>,
+        stream: HttpsClientStream,
+        addr: SocketAddr,
+        resp_tx: mpsc::Sender<io::Result<(BytesMut, SocketAddr)>>,
     }
-    pub async fn run(&mut self) -> Result<()> {
-        while let Some(msg) = self.rx.recv().await {
-            let req = DnsRequest::new(msg, Default::default());
-            let stream = self.stream.send_message(req);
-            let tx = self.resp_tx.clone();
-            // TODO: shutdown?
-            let addr = self.addr;
-            tokio::spawn(async move {
-                let resp = stream.first_answer().await;
-                // TODO: unfortunately (for us) trustdns is deserializing the message
-                // so we have to convert it back to a vec in order to use it..
-                if let Ok(resp) = resp {
-                    let bytes = BytesMut::from(&resp.to_vec()?[..]);
-                    tx.send(Ok((bytes, addr)))
-                        .await
-                        .context("failed to send DOH response to gen")?;
-                }
-                Ok::<_, anyhow::Error>(())
-            });
+
+    impl DohSender {
+        pub async fn new(
+            target: SocketAddr,
+            name_server: impl Into<String>,
+        ) -> Result<(
+            Self,
+            mpsc::Sender<Vec<u8>>,
+            mpsc::Receiver<io::Result<(BytesMut, SocketAddr)>>,
+        )> {
+            let (tx, rx) = mpsc::channel(100_000);
+            let (resp_tx, resp_rx) = mpsc::channel(100_000);
+            let mut root_store = RootCertStore::empty();
+            root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+            let versions = vec![ProtocolVersion::TLSv1_2];
+
+            let mut client_config = ClientConfig::new();
+            client_config.root_store = root_store;
+            client_config.versions = versions;
+            client_config.alpn_protocols.push(b"h2".to_vec());
+            client_config.key_log = Arc::new(KeyLogFile::new());
+
+            let https_builder =
+                HttpsClientStreamBuilder::with_client_config(Arc::new(client_config));
+            let stream = https_builder
+                .build::<AsyncIoTokioAsStd<TokioTcpStream>>(target, name_server.into())
+                .await?;
+
+            Ok((
+                Self {
+                    rx,
+                    resp_tx,
+                    stream,
+                    addr: target,
+                },
+                tx,
+                resp_rx,
+            ))
         }
-        Ok(())
+        pub async fn run(&mut self) -> Result<()> {
+            while let Some(msg) = self.rx.recv().await {
+                let stream = self.stream.send_bytes(msg);
+                let tx = self.resp_tx.clone();
+                // TODO: shutdown?
+                let addr = self.addr;
+                tokio::spawn(async move {
+                    let resp = stream.first_answer().await;
+                    // TODO: unfortunately (for us) trustdns is deserializing the message
+                    // so we have to convert it back to a vec in order to use it..
+                    if let Ok(resp) = resp {
+                        // let bytes = BytesMut::from(&resp)?[..]);
+                        tx.send(Ok((resp, addr)))
+                            .await
+                            .context("failed to send DOH response to gen")?;
+                    }
+                    Ok::<_, anyhow::Error>(())
+                });
+            }
+            Ok(())
+        }
     }
 }

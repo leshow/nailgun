@@ -25,7 +25,7 @@ use rand;
 use rand::distributions::{Distribution, Standard};
 
 use crate::error::*;
-use crate::op::{Message, MessageFinalizer, MessageVerifier};
+use crate::op::{MessageFinalizer, MessageVerifier};
 use crate::xfer::{
     ignore_send, BufDnsStreamHandle, DnsClientStream, DnsRequest, DnsRequestSender, DnsResponse,
     DnsResponseStream, SerialMessage, CHANNEL_BUFFER_SIZE,
@@ -37,7 +37,7 @@ const QOS_MAX_RECEIVE_MSGS: usize = 100; // max number of messages to receive fr
 
 struct ActiveRequest {
     // the completion is the channel for a response to the original request
-    completion: mpsc::Sender<Result<DnsResponse<Message>, ProtoError>>,
+    completion: mpsc::Sender<Result<DnsResponse, ProtoError>>,
     request_id: u16,
     timeout: Box<dyn Future<Output = ()> + Send + Unpin>,
     verifier: Option<MessageVerifier>,
@@ -45,7 +45,7 @@ struct ActiveRequest {
 
 impl ActiveRequest {
     fn new(
-        completion: mpsc::Sender<Result<DnsResponse<Message>, ProtoError>>,
+        completion: mpsc::Sender<Result<DnsResponse, ProtoError>>,
         request_id: u16,
         timeout: Box<dyn Future<Output = ()> + Send + Unpin>,
         verifier: Option<MessageVerifier>,
@@ -265,7 +265,7 @@ where
     S: DnsClientStream + Unpin + 'static,
     MF: MessageFinalizer + Send + Sync + 'static,
 {
-    fn send_message(&mut self, request: DnsRequest) -> DnsResponseStream<Message> {
+    fn send_message(&mut self, request: DnsRequest) -> DnsResponseStream {
         if self.is_shutdown {
             panic!("can not send messages after stream is shutdown")
         }

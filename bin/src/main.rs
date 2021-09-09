@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Clap;
 use tokio::{
     runtime::Builder,
@@ -47,14 +47,20 @@ use crate::{
 fn main() -> Result<()> {
     let mut args = Args::parse();
     // set default address for family if none provided
-    if args.ip.is_none() {
+    if args.bind_ip.is_none() {
         match args.family {
             Family::INet6 => {
-                args.ip = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+                args.bind_ip = Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED));
             }
             Family::INet => {
-                args.ip = Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+                args.bind_ip = Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
             }
+        }
+    } else if let Some(ip) = args.bind_ip {
+        if ip.is_ipv4() && args.family == Family::INet6 {
+            bail!("can't bind to ipv4 while in ipv6 mode");
+        } else if ip.is_ipv6() && args.family == Family::INet {
+            bail!("can't bind to ipv6 while in ipv4 mode");
         }
     }
 

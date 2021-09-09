@@ -13,7 +13,6 @@ use std::task::{Context, Poll};
 use futures_util::stream::{Stream, StreamExt};
 
 use crate::error::{ProtoError, ProtoErrorKind};
-use crate::op::Message;
 use crate::xfer::{DnsRequest, DnsResponse};
 use crate::DnsHandle;
 
@@ -52,8 +51,7 @@ where
     H: DnsHandle + Send + Unpin + 'static,
     H::Error: RetryableError,
 {
-    type Response =
-        Pin<Box<dyn Stream<Item = Result<DnsResponse<Message>, Self::Error>> + Send + Unpin>>;
+    type Response = Pin<Box<dyn Stream<Item = Result<DnsResponse, Self::Error>> + Send + Unpin>>;
     type Error = <H as DnsHandle>::Error;
 
     fn send<R: Into<DnsRequest>>(&mut self, request: R) -> Self::Response {
@@ -87,7 +85,7 @@ impl<H: DnsHandle + Unpin> Stream for RetrySendStream<H>
 where
     <H as DnsHandle>::Error: RetryableError,
 {
-    type Item = Result<DnsResponse<Message>, <H as DnsHandle>::Error>;
+    type Item = Result<DnsResponse, <H as DnsHandle>::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // loop over the stream, on errors, spawn a new stream
@@ -155,8 +153,7 @@ mod test {
     }
 
     impl DnsHandle for TestClient {
-        type Response =
-            Box<dyn Stream<Item = Result<DnsResponse<Message>, ProtoError>> + Send + Unpin>;
+        type Response = Box<dyn Stream<Item = Result<DnsResponse, ProtoError>> + Send + Unpin>;
         type Error = ProtoError;
 
         fn send<R: Into<DnsRequest>>(&mut self, _: R) -> Self::Response {

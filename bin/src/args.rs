@@ -13,7 +13,7 @@ pub struct Args {
     /// IP address to bind to. If family not set will use
     /// [default: 0.0.0.0]
     #[clap(long, short = 'b')]
-    pub ip: Option<IpAddr>,
+    pub bind_ip: Option<IpAddr>,
     /// which port to nail
     #[clap(long, short = 'p', default_value = "53")]
     pub port: u16,
@@ -83,7 +83,9 @@ impl FromStr for LogStructure {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Protocol {
     Udp,
-    Tcp, // DOH
+    Tcp,
+    #[cfg(feature = "doh")]
+    DoH,
 }
 
 impl FromStr for Protocol {
@@ -92,6 +94,14 @@ impl FromStr for Protocol {
         match &s.to_ascii_lowercase()[..] {
             "udp" => Ok(Protocol::Udp),
             "tcp" => Ok(Protocol::Tcp),
+            #[cfg(feature = "doh")]
+            "doh" => Ok(Protocol::DoH),
+            #[cfg(feature = "doh")]
+            _ => Err(anyhow!(
+                "unknown protocol type: {:?} must be \"udp\" or \"tcp\" \"doh\"",
+                s
+            )),
+            #[cfg(not(feature = "doh"))]
             _ => Err(anyhow!(
                 "unknown protocol type: {:?} must be \"udp\" or \"tcp\"",
                 s

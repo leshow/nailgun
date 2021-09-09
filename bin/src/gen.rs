@@ -6,9 +6,9 @@ use std::{
     time::{Duration, Instant as StdInstant},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -28,12 +28,14 @@ use tokio_util::{
 };
 use tracing::{error, info, trace};
 
+#[cfg(feature = "doh")]
+use crate::sender::doh::DohSender;
 use crate::{
     args::Protocol,
     config::Config,
     msg::{BufMsg, TcpDecoder},
     query::{FileGen, RandomPkt, RandomQName, Source, StaticGen},
-    sender::{DohSender, MsgSend, Sender},
+    sender::{MsgSend, Sender},
     shutdown::Shutdown,
     stats::{StatsInterval, StatsTracker},
     store::{AtomicStore, Store},
@@ -54,27 +56,18 @@ impl Generator {
 
         let bucket = self.config.rate_limiter();
 
-        let (mut reader, sender) = match self.config.protocol {
-            // TODO: Probably not realistic that each generator maintains one TcpStream.
-            // Would need to drop this abstraction in order to have tcp gen open/close multiple
-            // connections?
-            Protocol::Tcp => {
-                TcpGen::build(
-                    Arc::clone(&store),
-                    Arc::clone(&stats.atomic_store),
-                    self.config.clone(),
-                    bucket,
-                )
-                .await?
-            }
-            Protocol::Udp => {
-                UdpGen::build(
-                    Arc::clone(&store),
-                    Arc::clone(&stats.atomic_store),
-                    self.config.clone(),
-                    bucket,
-                )
-                .await?
+        let (mut reader, sender) = {
+            let store = Arc::clone(&store);
+            let atomic_store = Arc::clone(&stats.atomic_store);
+            let config = self.config.clone();
+            match self.config.protocol {
+                // TODO: Probably not realistic that each generator maintains one TcpStream.
+                // Would need to drop this abstraction in order to have tcp gen open/close multiple
+                // connections?
+                Protocol::Tcp => TcpGen::build(store, atomic_store, config, bucket).await?,
+                Protocol::Udp => UdpGen::build(store, atomic_store, config, bucket).await?,
+                #[cfg(feature = "doh")]
+                Protocol::DoH => DohGen::build(store, atomic_store, config, bucket).await?,
             }
         };
         let mut sender = self.sender_task(sender)?;
@@ -242,6 +235,7 @@ impl Generator {
 
 struct TcpGen;
 struct UdpGen;
+#[cfg(feature = "doh")]
 struct DohGen;
 
 #[async_trait]
@@ -312,6 +306,7 @@ impl BuildGen for UdpGen {
     }
 }
 
+#[cfg(feature = "doh")]
 #[async_trait]
 impl BuildGen for DohGen {
     async fn build(
@@ -319,11 +314,21 @@ impl BuildGen for DohGen {
         atomic_store: Arc<AtomicStore>,
         config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(
-        Pin<Box<dyn Stream<Item = io::Result<(BytesMut, SocketAddr)>> + Send>>,
-        Sender,
-    )> {
-        let (doh, tx, resp_rx) = DohSender::new(config.target).await;
+    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
+        let (mut doh, tx, resp_rx) = DohSender::new(
+            config.target,
+            config
+                .name_server
+                .clone()
+                .context("doh must always have a dns name")?,
+        )
+        .await?;
+        // TODO: joinhandle & shutdown?
+        tokio::spawn(async move {
+            if let Err(err) = doh.run().await {
+                error!(%err, "error in doh task");
+            }
+        });
         let sender = Sender {
             s: MsgSend::Doh { s: tx },
             config,

@@ -17,7 +17,6 @@ use futures_util::stream::{Fuse, Peekable, Stream, StreamExt};
 use log::{debug, warn};
 
 use crate::error::*;
-use crate::op::Message;
 use crate::Time;
 
 mod dns_exchange;
@@ -127,7 +126,7 @@ pub trait DnsRequestSender: Stream<Item = Result<(), ProtoError>> + Send + Unpin
     /// # Return
     ///
     /// A stream which will resolve to SerialMessage responses
-    fn send_message(&mut self, message: DnsRequest) -> DnsResponseStream<Message>;
+    fn send_message(&mut self, message: DnsRequest) -> DnsResponseStream;
 
     /// Allows the upstream user to inform the underling stream that it should shutdown.
     ///
@@ -159,7 +158,7 @@ macro_rules! try_oneshot {
 }
 
 impl DnsHandle for BufDnsRequestStreamHandle {
-    type Response = DnsResponseReceiver<Message>;
+    type Response = DnsResponseReceiver<DnsResponse>;
     type Error = ProtoError;
 
     fn send<R: Into<DnsRequest>>(&mut self, request: R) -> Self::Response {
@@ -180,16 +179,13 @@ impl DnsHandle for BufDnsRequestStreamHandle {
 /// A OneshotDnsRequest creates a channel for a response to message
 pub struct OneshotDnsRequest {
     dns_request: DnsRequest,
-    sender_for_response: oneshot::Sender<DnsResponseStream<Message>>,
+    sender_for_response: oneshot::Sender<DnsResponseStream>,
 }
 
 impl OneshotDnsRequest {
     fn oneshot(
         dns_request: DnsRequest,
-    ) -> (
-        OneshotDnsRequest,
-        oneshot::Receiver<DnsResponseStream<Message>>,
-    ) {
+    ) -> (OneshotDnsRequest, oneshot::Receiver<DnsResponseStream>) {
         let (sender_for_response, receiver) = oneshot::channel();
 
         (
@@ -201,7 +197,7 @@ impl OneshotDnsRequest {
         )
     }
 
-    fn into_parts(self) -> (DnsRequest, OneshotDnsResponse<Message>) {
+    fn into_parts(self) -> (DnsRequest, OneshotDnsResponse<DnsResponse>) {
         (
             self.dns_request,
             OneshotDnsResponse(self.sender_for_response),
@@ -231,7 +227,7 @@ pub enum DnsResponseReceiver<T> {
 }
 
 impl<T> Stream for DnsResponseReceiver<T> {
-    type Item = Result<DnsResponse<T>, ProtoError>;
+    type Item = Result<T, ProtoError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {

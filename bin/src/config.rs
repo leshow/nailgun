@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -14,13 +14,14 @@ use governor::{
 use trust_dns_proto::rr::Name;
 
 use crate::{
-    args::{Args, GenType, Protocol},
+    args::{self, Args, GenType, Protocol},
     query::Source,
 };
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub target: SocketAddr,
+    pub name_server: Option<String>,
     pub protocol: Protocol,
     pub bind: IpAddr,
     qps: u32,
@@ -102,24 +103,32 @@ impl TryFrom<&Args> for Config {
             },
         };
 
-        let target = match args.target.parse::<IpAddr>() {
-            Ok(target) => target,
+        let (target, name_server) = match args.target.parse::<IpAddr>() {
+            #[cfg(feature = "doh")]
+            Ok(target) if args.protocol == args::Protocol::DoH => {
+                bail!("found {}: need to use a domain name for DoH", target)
+            }
+            Ok(target) => (target, None),
             Err(_) => {
                 // is not an IP, so see if we can resolve it over dns
                 let resolver =
                     Resolver::new(ResolverConfig::default(), ResolverOpts::default()).unwrap();
                 let response = resolver.lookup_ip(args.target.clone()).unwrap();
 
-                response
-                    .iter()
-                    .next()
-                    .context("Resolver failed to return an addr")?
+                (
+                    response
+                        .iter()
+                        .next()
+                        .context("Resolver failed to return an addr")?,
+                    Some(args.target.clone()),
+                )
             }
         };
         Ok(Self {
             target: (target, args.port).into(),
+            name_server,
             protocol: args.protocol,
-            bind: args.ip.context("Args::ip always has a value")?,
+            bind: args.bind_ip.context("Args::ip always has a value")?,
             query_src,
             qps: args.qps,
             timeout: Duration::from_secs(args.timeout),
