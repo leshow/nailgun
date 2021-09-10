@@ -5,7 +5,7 @@
     non_snake_case,
     non_upper_case_globals
 )]
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![allow(clippy::cognitive_complexity)]
 
 use std::{
