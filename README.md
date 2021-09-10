@@ -46,6 +46,8 @@ Will spawn 16 OS threads (`w`/`wcount`) on the tokio runtime and 1 traffic gener
 
 ### DoH (new!)
 
+`nailgun` can now send DoH messages!
+
 ```
 nailgun dns.google -Q 2 -P doh
 ```
