@@ -44,6 +44,12 @@ Will spawn 16 OS threads (`w`/`wcount`) on the tokio runtime and 1 traffic gener
 
 **Note** If you want a quick server to test against, I've been spinning up `dnsdist` and adding `addAction(AllRule(), RCodeAction(3))` to its config so that all DNS messages immediately return with `NXDomain`.
 
+### DoH (new!)
+
+```
+nailgun dns.google -Q 2 -P doh
+```
+
 ### Building & Installing
 
 To build locally:

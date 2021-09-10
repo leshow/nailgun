@@ -316,8 +316,7 @@ impl BuildGen for DohGen {
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
         let (mut doh, tx, resp_rx) = DohSender::new(
-            // FIXME: need to get the correct address for this, then it looks to be working
-            ([1, 1, 1, 1], 443).into(),
+            config.target,
             config
                 .name_server
                 .clone()

@@ -112,6 +112,19 @@ impl FromStr for Protocol {
     }
 }
 
+impl Protocol {
+    pub fn is_udp(&self) -> bool {
+        matches!(*self, Protocol::Udp)
+    }
+    pub fn is_tcp(&self) -> bool {
+        matches!(self, Protocol::Tcp)
+    }
+    #[cfg(feature = "doh")]
+    pub fn is_doh(&self) -> bool {
+        matches!(*self, Protocol::DoH)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Family {
     INet,
