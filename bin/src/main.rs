@@ -62,6 +62,12 @@ fn main() -> Result<()> {
         }
     }
 
+    // change default port for doh
+    #[cfg(feature = "doh")]
+    if args.protocol.is_doh() && args.port == 53 {
+        args.port = 443;
+    }
+
     let _guard = logs::setup(&args);
 
     trace!("{:?}", args);
