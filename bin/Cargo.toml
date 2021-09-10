@@ -20,7 +20,7 @@ clap = "3.0.0-beta.4"
 bytes = "1.1"
 num_cpus = "1.13.0"
 tokio = { version = "1.11", features = ["full"] }
-tokio-util = { version = "0.6.7", features = ["full"] }
+tokio-util = { version = "0.6.8", features = ["full"] }
 tokio-stream = "0.1.7"
 trust-dns-proto = { version = "0.20.3", features = ["dnssec"] }
 trust-dns-resolver = { version = "0.20.3", features = ["dnssec"] }
