@@ -30,14 +30,12 @@ pub struct Builder {
     capacity: usize,
     rate: usize,
     interval: Duration,
-    initial: usize,
 }
 
 impl Default for Builder {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_CAP,
-            initial: DEFAULT_CAP,
             rate: DEFAULT_RATE,
             interval: DEFAULT_INTERVAL,
         }
@@ -46,15 +44,19 @@ impl Default for Builder {
 
 impl Builder {
     /// ```rust
+    /// use tokenbucket::Builder;
+    /// # use anyhow::Result;
     /// #[tokio::main]
-    /// async fn main() {
+    /// async fn main() -> Result<()> {
     ///     let mut bucket = Builder::new()
     ///         .capacity(100)
     ///         .rate(1)
     ///         .interval_secs(1)
-    ///         .build();
-    ///     tokio::spawn(async move { bucket.run().await.expect("token bucket task failed") });
-    ///     bucket.tokens(1).await
+    ///         .build_async();
+    ///     let runner = bucket.runner();
+    ///     tokio::spawn(async move { runner.run().await });
+    ///     bucket.tokens(1).await?;
+    ///     Ok(())
     /// }
     /// ```
     pub fn new() -> Self {
@@ -76,11 +78,6 @@ impl Builder {
         self
     }
 
-    pub fn initial(&mut self, initial: usize) -> &mut Self {
-        self.initial = initial;
-        self
-    }
-
     pub fn interval_secs(&mut self, interval: u64) -> &mut Self {
         self.interval(Duration::from_secs(interval))
     }
@@ -90,7 +87,7 @@ impl Builder {
     }
 
     pub fn build(&mut self) -> TokenBucket {
-        let (tx, rx) = crossbeam_channel::bounded(self.initial);
+        let (tx, rx) = crossbeam_channel::bounded(self.capacity);
         TokenBucket {
             capacity: self.capacity,
             rate: self.rate,
@@ -101,7 +98,7 @@ impl Builder {
     }
 
     pub fn build_async(&mut self) -> AsyncTokenBucket {
-        let semaphore = Arc::new(Semaphore::new(self.initial));
+        let semaphore = Arc::new(Semaphore::new(self.capacity));
         AsyncTokenBucket {
             semaphore,
             capacity: self.capacity,
@@ -137,7 +134,11 @@ impl AsyncTokenRunner {
             let permits = self.semaphore.available_permits();
             if permits + self.rate > self.capacity {
                 // top up the permits
-                self.semaphore.add_permits(self.capacity - permits);
+                if permits >= self.capacity {
+                    // add nothing, we are over capacity
+                } else {
+                    self.semaphore.add_permits(self.capacity - permits);
+                }
             } else {
                 self.semaphore.add_permits(self.rate);
             }
