@@ -74,7 +74,7 @@ cargo install
 - first batch of messages always seems to be double the set QPS (try `--limit-secs 5 -Q 10` for example, it will end up sending 60 queries)
 - some TODO cleanups left in the code to address
 - arg parsing for generator is very different from flamethrower because clap doesn't seem to support parsing it in the same style-- would be nice to figure this out
-- combine logging output from all generators rather than having them run individually
+- ~~combine logging output from all generators rather than having them run individually~~
 - more generator types?
-- maybe leverage other parts of trustdns to make options for interesting types of queries. mDNS? DOH?
+- maybe leverage other parts of trustdns to make options for interesting types of queries. DOT? ~~DOH~~?
 - suggestions? bugs?
