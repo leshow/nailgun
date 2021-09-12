@@ -13,6 +13,3 @@ pub mod tls_stream;
 
 pub use self::tls_client_stream::{tls_client_connect, TlsClientStream};
 pub use self::tls_stream::{tls_connect, tls_from_stream, TlsStream};
-
-#[cfg(test)]
-mod tests;
