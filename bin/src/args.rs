@@ -113,9 +113,11 @@ impl FromStr for Protocol {
 }
 
 impl Protocol {
+    #[allow(dead_code)]
     pub fn is_udp(&self) -> bool {
         matches!(*self, Protocol::Udp)
     }
+    #[allow(dead_code)]
     pub fn is_tcp(&self) -> bool {
         matches!(self, Protocol::Tcp)
     }
