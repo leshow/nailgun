@@ -272,7 +272,6 @@ impl StatsInterval {
 pub struct StatsTotals {
     duration: Duration,
     elapsed: Duration,
-    interval: usize,
     sent: u64,
     recv: u64,
     ok_recv: u64,
@@ -294,7 +293,6 @@ impl Default for StatsTotals {
             avg_latency: MovingAvg::new(0.),
             min_latency: f32::MAX,
             max_latency: 0.,
-            interval: 0,
             sent: 0,
             recv: 0,
             ok_recv: 0,
