@@ -114,7 +114,7 @@ impl MsgSend {
 pub mod doh {
     use super::*;
 
-    use bytes::BytesMut;
+    use bytes::Bytes;
     use rustls::{ClientConfig, KeyLogFile, ProtocolVersion, RootCertStore};
     use tokio::net::TcpStream as TokioTcpStream;
     use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
@@ -127,7 +127,7 @@ pub mod doh {
         rx: mpsc::Receiver<Vec<u8>>,
         stream: HttpsClientStream,
         addr: SocketAddr,
-        resp_tx: mpsc::Sender<io::Result<(BytesMut, SocketAddr)>>,
+        resp_tx: mpsc::Sender<io::Result<(Bytes, SocketAddr)>>,
     }
 
     impl DohSender {
@@ -137,7 +137,7 @@ pub mod doh {
         ) -> Result<(
             Self,
             mpsc::Sender<Vec<u8>>,
-            mpsc::Receiver<io::Result<(BytesMut, SocketAddr)>>,
+            mpsc::Receiver<io::Result<(Bytes, SocketAddr)>>,
         )> {
             let (tx, rx) = mpsc::channel(100_000);
             let (resp_tx, resp_rx) = mpsc::channel(100_000);
@@ -176,11 +176,8 @@ pub mod doh {
                 let addr = self.addr;
                 tokio::spawn(async move {
                     let resp = stream.first_answer().await;
-                    // TODO: unfortunately (for us) trustdns is deserializing the message
-                    // so we have to convert it back to a vec in order to use it..
                     if let Ok(resp) = resp {
-                        // let bytes = BytesMut::from(&resp)?[..]);
-                        tx.send(Ok((resp, addr)))
+                        tx.send(Ok((resp.freeze(), addr)))
                             .await
                             .context("failed to send DOH response to gen")?;
                     }

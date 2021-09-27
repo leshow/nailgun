@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use bytes::BytesMut;
+use bytes::Bytes;
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -22,10 +22,7 @@ use tokio::{
     time::{self, Instant},
 };
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tokio_util::{
-    codec::{BytesCodec, FramedRead},
-    udp::UdpFramed,
-};
+use tokio_util::{codec::FramedRead, udp::UdpFramed};
 use tracing::{error, info, trace};
 
 #[cfg(feature = "doh")]
@@ -33,7 +30,7 @@ use crate::sender::doh::DohSender;
 use crate::{
     args::Protocol,
     config::Config,
-    msg::{BufMsg, TcpDecoder},
+    msg::{BufMsg, BytesFreezeCodec, TcpDnsCodec},
     query::{FileGen, RandomPkt, RandomQName, Source, StaticGen},
     sender::{MsgSend, Sender},
     shutdown::Shutdown,
@@ -96,7 +93,7 @@ impl Generator {
                         None => return Ok(())
                     };
                     if let Ok((buf, addr)) = frame {
-                        let msg = BufMsg::new(buf.freeze(), addr);
+                        let msg = BufMsg::new(buf, addr);
                         let id = msg.msg_id();
                         let mut store = store.lock();
                         store.ids.push_back(id);
@@ -245,7 +242,7 @@ trait BuildGen {
         atomic_store: Arc<AtomicStore>,
         config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)>;
+    ) -> Result<(BoxStream<io::Result<(Bytes, SocketAddr)>>, Sender)>;
 }
 
 type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
@@ -257,13 +254,13 @@ impl BuildGen for TcpGen {
         atomic_store: Arc<AtomicStore>,
         config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
+    ) -> Result<(BoxStream<io::Result<(Bytes, SocketAddr)>>, Sender)> {
         trace!("building TCP generator with target {}", config.target);
         // TODO: shutdown ?
         let (r, s) = TcpStream::connect(config.target).await?.into_split();
         let reader = FramedRead::new(
             r,
-            TcpDecoder {
+            TcpDnsCodec {
                 target: config.target,
             },
         );
@@ -285,13 +282,13 @@ impl BuildGen for UdpGen {
         atomic_store: Arc<AtomicStore>,
         config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
+    ) -> Result<(BoxStream<io::Result<(Bytes, SocketAddr)>>, Sender)> {
         trace!("building UDP generator");
         // bind to specified addr (will be 0.0.0.0 in most cases)
         let r = Arc::new(UdpSocket::bind((config.bind, 0)).await?);
         let s = Arc::clone(&r);
 
-        let recv = UdpFramed::new(r, BytesCodec::new());
+        let recv = UdpFramed::new(r, BytesFreezeCodec::new());
         let sender = Sender {
             s: MsgSend::Udp {
                 s,
@@ -314,7 +311,7 @@ impl BuildGen for DohGen {
         atomic_store: Arc<AtomicStore>,
         config: Config,
         bucket: Option<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-    ) -> Result<(BoxStream<io::Result<(BytesMut, SocketAddr)>>, Sender)> {
+    ) -> Result<(BoxStream<io::Result<(Bytes, SocketAddr)>>, Sender)> {
         let (mut doh, tx, resp_rx) = DohSender::new(
             config.target,
             config
