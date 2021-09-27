@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use bytes::Bytes;
 use bytes::{Buf, BytesMut};
-use tokio_util::codec::Decoder;
+use tokio_util::codec::{BytesCodec, Decoder};
 
 #[derive(Clone, Debug)]
 pub struct BufMsg {
@@ -44,12 +44,12 @@ impl From<(Bytes, SocketAddr)> for BufMsg {
     }
 }
 
-pub struct TcpDecoder {
+pub struct TcpDnsCodec {
     pub target: SocketAddr,
 }
 
-impl Decoder for TcpDecoder {
-    type Item = (BytesMut, SocketAddr);
+impl Decoder for TcpDnsCodec {
+    type Item = (Bytes, SocketAddr);
     type Error = std::io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -70,7 +70,25 @@ impl Decoder for TcpDecoder {
         }
 
         src.advance(2); // advance over len
-        let buf = src.split_to(length);
+        let buf = src.split_to(length).freeze();
         Ok(Some((buf, self.target)))
+    }
+}
+
+/// BytesCodec that returns frozen Bytes
+pub struct BytesFreezeCodec(BytesCodec);
+
+impl BytesFreezeCodec {
+    pub fn new() -> Self {
+        Self(BytesCodec::new())
+    }
+}
+
+impl Decoder for BytesFreezeCodec {
+    type Item = Bytes;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(self.0.decode(src)?.map(|b| b.freeze()))
     }
 }
