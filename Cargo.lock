@@ -661,8 +661,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "nailgun"
-version = "0.1.0"
+name = "naildns"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
