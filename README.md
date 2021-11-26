@@ -14,7 +14,7 @@ You can specify a specific QPS with `-Q`, this allows you to set a desired QPS r
 
 ### Output
 
-`--output` allows you to specify different logging formats, courtesy of `tracing`. "pretty", "json" and "debug" are currently supported with "pretty" as the default. You can use `RUST_LOG` to filter on the output (ex. `RUST_LOG="nailgun=trace"` will print trace level from the nailgun bin only). `nailgun` uses stdout by default, but will log to file if you accompany this with the `-o` flag and a path.
+`--output` allows you to specify different logging formats, courtesy of `tracing`. "pretty", "json" and "debug" are currently supported with "pretty" as the default. You can use `RUST_LOG` to filter on the output (ex. `RUST_LOG="naildns=trace"` will print trace level from the `naildns` bin only). `nailgun` uses stdout by default, but will log to file if you accompany this with the `-o` flag and a path.
 
 Regardless of these options, a summary is printed to stdout sans-tracing after the run is over.
 
@@ -22,35 +22,35 @@ Regardless of these options, a summary is printed to stdout sans-tracing after t
 
 There are multiple generator types available with `-g`, the default is `static` but you can generate queries from file also or with some portion randomly generated.
 
-## Usage
-
-```
-nailgun --help
-```
-
-By default, `nailgun` will spawn a single threaded tokio runtime and 1 traffic generator:
-
-```
-nailgun 0.0.0.0 -p 1953
-```
-
-This can be scaled up:
-
-```
-nailgun 0.0.0.0 -p 1953 -w 16 -t 1
-```
-
-Will spawn 16 OS threads (`w`/`wcount`) on the tokio runtime and 1 traffic generator (`t`/`tcount`) per thread spawned, for a total of 16\*1 = 16 traffic generators.
-
-**Note** If you want a quick server to test against, I've been spinning up `dnsdist` and adding `addAction(AllRule(), RCodeAction(3))` to its config so that all DNS messages immediately return with `NXDomain`.
-
 ### DoH (new!)
 
 `nailgun` can now send DoH messages!
 
 ```
-nailgun dns.google -Q 2 -P doh
+naildns dns.google -Q 2 -P doh
 ```
+
+## Usage
+
+```
+naildns --help
+```
+
+By default, nailgun will spawn a single threaded tokio runtime and 1 traffic generator:
+
+```
+naildns 0.0.0.0 -p 1953
+```
+
+This can be scaled up:
+
+```
+naildns 0.0.0.0 -p 1953 -w 16 -t 1
+```
+
+Will spawn 16 OS threads (`w`/`wcount`) on the tokio runtime and 1 traffic generator (`t`/`tcount`) per thread spawned, for a total of 16\*1 = 16 traffic generators.
+
+**Note** If you want a quick server to test against, I've been spinning up `dnsdist` and adding `addAction(AllRule(), RCodeAction(3))` to its config so that all DNS messages immediately return with `NXDomain`.
 
 ### Building & Installing
 
@@ -60,7 +60,11 @@ To build locally:
 cargo build --release
 ```
 
-`nailgun` binary will be present in `target/release/nailgun`
+`naildns` binary will be present in `target/release/naildns`
+
+#### From crates.io
+
+#### Local
 
 To install locally
 
