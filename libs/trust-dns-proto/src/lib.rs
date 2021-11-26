@@ -21,6 +21,7 @@
 #![allow(
     clippy::single_component_path_imports,
     clippy::upper_case_acronyms, // can be removed on a major release boundary
+    clippy::all
 )]
 #![recursion_limit = "2048"]
 #![cfg_attr(docsrs, feature(doc_cfg))]

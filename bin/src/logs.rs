@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
-    fmt::{self, format::Pretty},
+    fmt::{
+        self,
+        format::{Format, PrettyFields},
+    },
     prelude::__tracing_subscriber_SubscriberExt,
     util::SubscriberInitExt,
     EnvFilter,
@@ -41,17 +44,22 @@ pub fn setup(args: &Args) -> Result<Option<WorkerGuard>> {
 
             let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
 
+            // dual layers will get registry to log to both stdout and file
             match args.output {
                 LogStructure::Pretty => {
                     registry
                         .with(
                             fmt::layer()
-                                .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                                .event_format(
+                                    Format::default().pretty().with_source_location(false),
+                                )
+                                .fmt_fields(PrettyFields::new())
                                 .with_target(false),
                         )
                         .with(
                             fmt::layer()
-                                .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                                .event_format(Format::default().with_source_location(false))
+                                .fmt_fields(PrettyFields::new())
                                 .with_target(false)
                                 .with_writer(non_blocking_appender),
                         )
@@ -78,7 +86,8 @@ pub fn setup(args: &Args) -> Result<Option<WorkerGuard>> {
                     registry
                         .with(
                             fmt::layer()
-                                .fmt_fields(Pretty::with_source_location(Pretty::default(), false))
+                                .event_format(Format::default().with_source_location(false))
+                                .fmt_fields(PrettyFields::new())
                                 .with_target(false),
                         )
                         .init();
