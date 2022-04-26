@@ -1,2 +1,2 @@
 [workspace]
-members = [ "bin", "libs/*" ]
+members = [ "bin" ]

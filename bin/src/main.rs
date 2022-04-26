@@ -14,7 +14,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Result};
-use clap::Clap;
+use clap::Parser;
 use tokio::{
     runtime::Builder,
     signal,

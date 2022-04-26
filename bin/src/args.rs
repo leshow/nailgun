@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Error, Result};
-use clap::Clap;
+use clap::Parser;
 use trust_dns_proto::rr::{DNSClass, Name, RecordType};
 
 use std::{net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
@@ -7,7 +7,7 @@ use std::{net::IpAddr, path::PathBuf, str::FromStr, time::Duration};
 use crate::{config::Config, query::Source};
 
 /// nailgun is a cli tool for stress testing and benchmarking DNS
-#[derive(Debug, Clap, Clone, PartialEq, Eq)]
+#[derive(Debug, Parser, Clone, PartialEq, Eq)]
 #[clap(author, about, version)]
 pub struct Args {
     /// IP or domain send traffic to
@@ -147,7 +147,7 @@ impl FromStr for Family {
     }
 }
 
-#[derive(Clap, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Parser, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum GenType {
     Static,
     #[clap(name = "randompkt")]

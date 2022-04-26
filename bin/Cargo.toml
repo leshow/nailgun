@@ -20,22 +20,22 @@ doh = ["trust-dns-proto/dns-over-https-rustls", "rustls", "webpki-roots"]
 [dependencies]
 async-trait = "0.1.51"
 anyhow = "1.0"
-clap = "3.0.0-beta.4"
+clap = { version = "3.1.6", features = ["derive"] }
 bytes = "1.1"
 num_cpus = "1.13.0"
-tokio = { version = "1.11", features = ["full"] }
-tokio-util = { version = "0.6.8", features = ["full"] }
-tokio-stream = "0.1.7"
-trust-dns-proto = { path = "../libs/trust-dns-proto" }
-trust-dns-resolver = { version = "0.21.0-alpha.2" }
+tokio = { version = "1.17.0", features = ["full"] }
+tokio-util = { version = "0.7.0", features = ["full"] }
+tokio-stream = "0.1.8"
+trust-dns-proto = { git = "https://github.com/leshow/trust-dns", branch = "mine_doh" }
+trust-dns-resolver = "0.21.2"
 tracing = "0.1.26"
 tracing-subscriber = { version = "0.3.5", features = ["env-filter","json"] }
 tracing-appender = "0.2.0"
 tracing-futures = "0.2.5"
-parking_lot = "0.11.2"
+parking_lot = "0.12.0"
 rustc-hash = "1.1.0"
-rustls = { version = "0.19", optional = true }
+rustls = { version = "0.20.4", optional = true }
 rand = "0.8"
-governor = "0.3.2"
+governor = "0.4.2"
 num-traits = "0.2.14"
-webpki-roots = { version = "0.21.0", optional = true }
+webpki-roots = { version = "0.22.3", optional = true }
