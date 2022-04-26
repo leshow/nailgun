@@ -115,13 +115,35 @@ pub mod doh {
     use super::*;
 
     use bytes::Bytes;
-    use rustls::{ClientConfig, KeyLogFile, ProtocolVersion, RootCertStore};
+    use rustls::{ClientConfig, KeyLogFile, OwnedTrustAnchor, RootCertStore};
     use tokio::net::TcpStream as TokioTcpStream;
     use trust_dns_proto::iocompat::AsyncIoTokioAsStd;
     use trust_dns_proto::{
         https::{HttpsClientStream, HttpsClientStreamBuilder},
         xfer::FirstAnswer,
     };
+
+    fn client_config_tls12_webpki_roots() -> ClientConfig {
+        let mut root_store = RootCertStore::empty();
+        root_store.add_server_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
+            OwnedTrustAnchor::from_subject_spki_name_constraints(
+                ta.subject,
+                ta.spki,
+                ta.name_constraints,
+            )
+        }));
+
+        let mut client_config = ClientConfig::builder()
+            .with_safe_default_cipher_suites()
+            .with_safe_default_kx_groups()
+            .with_protocol_versions(&[&rustls::version::TLS12])
+            .unwrap()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+
+        client_config.alpn_protocols = vec![b"h2".to_vec()];
+        client_config
+    }
 
     pub struct DohSender {
         rx: mpsc::Receiver<Vec<u8>>,
@@ -141,14 +163,8 @@ pub mod doh {
         )> {
             let (tx, rx) = mpsc::channel(100_000);
             let (resp_tx, resp_rx) = mpsc::channel(100_000);
-            let mut root_store = RootCertStore::empty();
-            root_store.add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-            let versions = vec![ProtocolVersion::TLSv1_2];
 
-            let mut client_config = ClientConfig::new();
-            client_config.root_store = root_store;
-            client_config.versions = versions;
-            client_config.alpn_protocols.push(b"h2".to_vec());
+            let mut client_config = client_config_tls12_webpki_roots();
             client_config.key_log = Arc::new(KeyLogFile::new());
 
             let https_builder =
