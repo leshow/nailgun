@@ -5,6 +5,8 @@ authors = ["Evan Cameron <cameron.evan@gmail.com>"]
 edition = "2021"
 description = """
 nailgun (binary called `naildns`) is a small tool written in Rust that supports benchmarking and stress testing DNS servers. It supports IPv4 & IPv6, UDP & TCP and can generate different kinds of queries
+
+ex. naildns 8.8.8.8 -Q 1 		(send 1 query per second to 8.8.8.8)
 """
 categories = ["command-line-utilities", "asynchronous", "network-programming"]
 keywords = ["nailgun", "dns", "performance", "testing"]
