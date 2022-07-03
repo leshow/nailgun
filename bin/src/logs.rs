@@ -56,13 +56,7 @@ pub fn setup(args: &Args) -> Result<Option<WorkerGuard>> {
                                 .fmt_fields(PrettyFields::new())
                                 .with_target(false),
                         )
-                        .with(
-                            fmt::layer()
-                                .event_format(Format::default().with_source_location(false))
-                                .fmt_fields(PrettyFields::new())
-                                .with_target(false)
-                                .with_writer(non_blocking_appender),
-                        )
+                        .with(fmt::layer().with_writer(non_blocking_appender))
                         .init();
                 }
                 LogStructure::Debug => {

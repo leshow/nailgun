@@ -79,57 +79,60 @@ fn main() -> Result<()> {
 
     // shutdown mechanism courtesy of https://github.com/tokio-rs/mini-redis
     rt.block_on(async move {
-        // When the provided `shutdown` future completes, we must send a shutdown
-        // message to all active connections. We use a broadcast channel for this
-        // purpose. The call below ignores the receiver of the broadcast pair, and when
-        // a receiver is needed, the subscribe() method on the sender is used to create
-        // one.
-        let (notify_shutdown, _) = broadcast::channel(1);
-        let (shutdown_complete_tx, shutdown_complete_rx) = mpsc::channel(1);
+        tokio::spawn(async move {
+            // When the provided `shutdown` future completes, we must send a shutdown
+            // message to all active connections. We use a broadcast channel for this
+            // purpose. The call below ignores the receiver of the broadcast pair, and when
+            // a receiver is needed, the subscribe() method on the sender is used to create
+            // one.
+            let (notify_shutdown, _) = broadcast::channel(1);
+            let (shutdown_complete_tx, shutdown_complete_rx) = mpsc::channel(1);
 
-        let limit_secs = args.limit_secs;
-        let mut runner = Runner {
-            args,
-            notify_shutdown,
-            shutdown_complete_rx,
-            shutdown_complete_tx,
-        };
-        tokio::select! {
-            res = runner.run() => {
-                if let Err(err) = res {
-                    error!(?err, "nailgun exited with an error");
+            let limit_secs = args.limit_secs;
+            let mut runner = Runner {
+                args,
+                notify_shutdown,
+                shutdown_complete_rx,
+                shutdown_complete_tx,
+            };
+            tokio::select! {
+                res = runner.run() => {
+                    if let Err(err) = res {
+                        error!(?err, "nailgun exited with an error");
+                    }
+                },
+                res = sig() => {
+                    info!("caught signal handler-- exiting");
+                    if let Err(err) = res {
+                        error!(?err);
+                    }
+                },
+                _ = time::sleep(Duration::from_secs(limit_secs)), if limit_secs != 0 => {
+                    trace!("limit reached-- exiting");
                 }
-            },
-            res = sig() => {
-                info!("caught signal handler-- exiting");
-                if let Err(err) = res {
-                    error!(?err);
-                }
-            },
-            _ = time::sleep(Duration::from_secs(limit_secs)), if limit_secs != 0 => {
-                trace!("limit reached-- exiting");
             }
-        }
-        let Runner {
-            mut shutdown_complete_rx,
-            shutdown_complete_tx,
-            notify_shutdown,
-            ..
-        } = runner;
-        trace!("sending shutdown signal");
-        // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
-        // receive the shutdown signal and can exit
-        drop(notify_shutdown);
-        // Drop final `Sender` so the `Receiver` below can complete
-        drop(shutdown_complete_tx);
+            let Runner {
+                mut shutdown_complete_rx,
+                shutdown_complete_tx,
+                notify_shutdown,
+                ..
+            } = runner;
+            trace!("sending shutdown signal");
+            // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
+            // receive the shutdown signal and can exit
+            drop(notify_shutdown);
+            // Drop final `Sender` so the `Receiver` below can complete
+            drop(shutdown_complete_tx);
 
-        // Wait for all active connections to finish processing. As the `Sender`
-        // handle held by the listener has been dropped above, the only remaining
-        // `Sender` instances are held by connection handler tasks. When those drop,
-        // the `mpsc` channel will close and `recv()` will return `None`.
-        let _ = shutdown_complete_rx.recv().await;
+            // Wait for all active connections to finish processing. As the `Sender`
+            // handle held by the listener has been dropped above, the only remaining
+            // `Sender` instances are held by connection handler tasks. When those drop,
+            // the `mpsc` channel will close and `recv()` will return `None`.
+            let _ = shutdown_complete_rx.recv().await;
 
-        Ok::<(), anyhow::Error>(())
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?
     })?;
 
     Ok(())
